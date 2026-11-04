@@ -13,9 +13,9 @@ reads your local PDF directly.
 
 ## See the difference
 
-These two original, single-page PDFs were made for the examples. They contain
-no personal manuscript material. For a fair comparison, use the same document,
-page, zoom, window size and display scaling in both previews.
+The examples use an original text specimen and an excerpt from a published
+paper. They contain no personal manuscript material. For a fair comparison,
+use the same document, page, zoom, window size and display scaling in both previews.
 
 ### Example 1: type, equations and small print
 
@@ -35,14 +35,28 @@ Compare letter edges, indices and the smallest labels on your own display.
 Real screenshots supplied from a large display. The original image pixels
 are preserved; click either image to inspect the full-resolution capture.
 
-### Example 2: fine lines and chart detail
+### Example 2: a published research paper
 
-[Download the demonstration PDF](docs/demos/vector-detail-demo.pdf)
+Source: [*Attention Is All You Need* — Vaswani et al. (2017), arXiv:1706.03762](https://arxiv.org/abs/1706.03762).
 
-This specimen contains vector curves, a dense grid, small axis labels and a
-0.20-1.00 pt line-width ladder. Compare thin strokes and grid intersections.
+The two screenshots show the same excerpt from the Introduction and Background
+sections. Compare the body text, italics and citation numbers.
 
-<!-- Insert the user's real large-display before/after screenshots here. -->
+<table>
+<tr><th>Codex default preview</th><th>codex-pdf-previewer</th></tr>
+<tr>
+<td><a href="docs/comparisons/attention-before.png"><img src="docs/comparisons/attention-before.png" alt="Default Codex preview of an excerpt from Attention Is All You Need, captured on a large display" width="560"></a></td>
+<td><a href="docs/comparisons/attention-after.png"><img src="docs/comparisons/attention-after.png" alt="The same excerpt from Attention Is All You Need in codex-pdf-previewer, captured on a large display" width="560"></a></td>
+</tr>
+</table>
+
+These are the supplied large-display screenshots with their original pixels
+preserved. Click an image to inspect it at full resolution. The complete paper
+is linked at its source and is not bundled with the plugin.
+
+For an additional original test document, try the
+[fine-line and chart-detail PDF](docs/demos/vector-detail-demo.pdf). It contains
+vector curves, a dense grid, small axis labels and a 0.20-1.00 pt line-width ladder.
 
 Actual appearance depends on the source PDF, zoom and display scaling. The
 comparisons use real screen captures; no simulated blur is used as a Codex
@@ -149,8 +163,9 @@ These records contain local paths and a shutdown token; keep them private.
 Static reader resources are cached there so an open session survives a plugin
 upgrade; your PDF bytes are not copied into that resource cache.
 `--state-dir` overrides the location. Plugin ZIPs contain no user PDFs, source
-manuscripts, screenshots, session records or logs. The two example PDFs live
-separately in this repository's `docs/demos/` directory.
+manuscripts, screenshots, session records or logs. The two generated example
+PDFs live separately in `docs/demos/`; comparison screenshots are in
+`docs/comparisons/`. The published paper is linked externally.
 
 ## Development
 
@@ -170,6 +185,8 @@ install ReportLab and run `python scripts/create_demo_pdfs.py`; output goes to
 
 ## License
 
-Original code and demonstration documents are available under the [MIT License](LICENSE).
+Original code and the two generated demonstration PDFs are available under the
+[MIT License](LICENSE). The published-paper excerpt in Example 2 is third-party
+material and is not covered by this project's MIT license.
 Bundled PDF.js is Apache-2.0; its font and decoder licenses are retained in
 [third-party notices](plugins/codex-pdf-previewer/THIRD_PARTY.md).
