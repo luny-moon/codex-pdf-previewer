@@ -147,7 +147,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn('installationId', result)
             self.assertEqual(config.read_bytes(), original)
             self.assertEqual(run.call_count, 2)
-            marketplace = home / 'plugin-sources/codex-pdf-previewer'
+            marketplace = home.resolve() / 'plugin-sources/codex-pdf-previewer'
             catalog = json.loads((marketplace / '.agents/plugins/marketplace.json').read_text())
             source = (marketplace / catalog['plugins'][0]['source']['path']).parent
             self.assertEqual(run.call_args_list[0].args[0], ['codex executable', 'plugin', 'marketplace', 'add', str(marketplace), '--json'])
