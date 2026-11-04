@@ -43,7 +43,9 @@ def cli(state, *args, check=True):
                             capture_output=True, text=True, encoding='utf-8', timeout=30)
     if check:
         if result.returncode:
-            raise AssertionError(result.stderr)
+            diagnostics = '\n'.join(path.read_text(encoding='utf-8', errors='replace')[-4000:]
+                                    for path in Path(state).glob('*.log'))
+            raise AssertionError(result.stderr + '\nSynthetic-session diagnostics:\n' + diagnostics)
         return json.loads(result.stdout)
     return result
 

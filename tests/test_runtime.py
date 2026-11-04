@@ -2,6 +2,7 @@ import concurrent.futures
 import importlib.util
 import json
 import os
+import socket
 import sys
 import tempfile
 import unittest
@@ -101,6 +102,15 @@ class ReaderTests(unittest.TestCase):
             self.assertEqual(launcher.default_state_root(), self.base / 'codex-hd-pdf-preview')
         with patch.object(launcher.sys, 'platform', 'linux'), patch.dict(os.environ, {'XDG_STATE_HOME': ''}):
             self.assertEqual(launcher.default_state_root(), Path.home() / '.local/state/codex-hd-pdf-preview')
+
+    def test_numeric_loopback_startup_needs_no_dns(self):
+        launcher = module_at('preview', LAUNCHER)
+        with patch.object(socket, 'getfqdn', side_effect=AssertionError('DNS must not be used')):
+            server = launcher.LoopbackServer(('127.0.0.1', 0), launcher.BaseHTTPRequestHandler)
+            try:
+                self.assertGreater(server.server_port, 0)
+            finally:
+                server.server_close()
 
 
 class PackageTests(unittest.TestCase):

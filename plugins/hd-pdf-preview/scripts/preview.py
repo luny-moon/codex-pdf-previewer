@@ -14,6 +14,7 @@ import time
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from urllib.error import URLError
 from urllib.parse import unquote, urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
@@ -22,6 +23,15 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / 'assets' / 'reader'
 PDFJS = ROOT / 'vendor' / 'pdfjs'
 OPENER = build_opener(ProxyHandler({}))
+
+
+class LoopbackServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # A numeric loopback listener needs no reverse-DNS lookup. HTTPServer's
+        # default getfqdn() can block startup on systems with slow host lookup.
+        TCPServer.server_bind(self)
+        self.server_name = '127.0.0.1'
+        self.server_port = self.server_address[1]
 
 
 def default_state_root():
@@ -278,7 +288,7 @@ def serve(args):
             self.send_json({'stopping': True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
 
-    server = ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    server = LoopbackServer(('127.0.0.1', args.port), Handler)
     server.daemon_threads = True
     record = {'url': f'http://127.0.0.1:{server.server_port}/', 'pdf': str(document),
               'pid': os.getpid(), 'instance': instance, 'shutdown_token': shutdown_token}
