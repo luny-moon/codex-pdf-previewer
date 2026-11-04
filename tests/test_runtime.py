@@ -96,35 +96,6 @@ class ReaderTests(unittest.TestCase):
         self.assertNotEqual(mismatch['url'], first['url'])
         self.assertTrue(mismatch['managed'])
 
-    def test_native_system_launcher(self):
-        env = os.environ.copy()
-        state = self.state
-        if sys.platform == 'win32':
-            env['LOCALAPPDATA'] = str(self.base / 'app data')
-            state = Path(env['LOCALAPPDATA']) / 'codex-pdf-previewer'
-            command = [env.get('COMSPEC', 'cmd.exe'), '/d', '/c',
-                       str(PLUGIN / 'open-pdf.cmd'), str(self.document)]
-        else:
-            name = 'open-pdf.command' if sys.platform == 'darwin' else 'open-pdf.sh'
-            command = ['sh', str(PLUGIN / name), str(self.document), '--state-dir', str(state)]
-        try:
-            result = subprocess.run(command, env=env, capture_output=True, text=True,
-                                    encoding='utf-8', timeout=30)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            session = json.loads(result.stdout)
-            self.assertEqual(get(session['url'] + 'document.pdf')[1], self.document.read_bytes())
-        finally:
-            cli(state, 'stop', '--all')
-
-    def test_desktop_entry_prepares_local_url_without_browser(self):
-        result = subprocess.run([sys.executable, str(PLUGIN / 'scripts/desktop_open.py'),
-                                 '--print-url', '--state-dir', str(self.state), str(self.document)],
-                                capture_output=True, text=True, encoding='utf-8', timeout=30)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        url = result.stdout.strip()
-        self.assertTrue(url.startswith('http://127.0.0.1:'))
-        self.assertEqual(get(url + 'document.pdf')[1], self.document.read_bytes())
-
     def test_reader_survives_plugin_cache_replacement(self):
         copied = self.base / 'temporary plugin'
         shutil.copytree(PLUGIN, copied)
@@ -157,6 +128,51 @@ class ReaderTests(unittest.TestCase):
                 server.server_close()
 
 
+class InstallerTests(unittest.TestCase):
+    def test_durable_source_and_scoped_cli_calls(self):
+        installer = module_at('installer', PLUGIN / 'install.py')
+        with tempfile.TemporaryDirectory(prefix='pdf-installer-') as temporary:
+            base = Path(temporary)
+            extracted = base / 'unzipped package'
+            shutil.copytree(PLUGIN, extracted)
+            home = base / 'Codex profile 文档 with spaces'
+            home.mkdir()
+            config = home / 'config.toml'
+            config.write_text('[plugins."unrelated@personal"]\nenabled = true\n', encoding='utf-8')
+            original = config.read_bytes()
+            success = subprocess.CompletedProcess([], 0, stdout='{"installationId":"private-record"}', stderr='')
+            with patch.object(installer, 'ROOT', extracted), patch.object(installer.subprocess, 'run', return_value=success) as run:
+                result = installer.install(home, 'codex executable')
+            self.assertTrue(result['installed'])
+            self.assertNotIn('installationId', result)
+            self.assertEqual(config.read_bytes(), original)
+            self.assertEqual(run.call_count, 2)
+            marketplace = home / 'plugin-sources/codex-pdf-previewer'
+            catalog = json.loads((marketplace / '.agents/plugins/marketplace.json').read_text())
+            source = (marketplace / catalog['plugins'][0]['source']['path']).parent
+            self.assertEqual(run.call_args_list[0].args[0], ['codex executable', 'plugin', 'marketplace', 'add', str(marketplace), '--json'])
+            self.assertEqual(run.call_args_list[1].args[0], ['codex executable', 'plugin', 'add', 'codex-pdf-previewer@codex-pdf-previewer-local', '--json'])
+            self.assertEqual(run.call_args_list[0].kwargs['env']['CODEX_HOME'], str(home.resolve()))
+            shutil.rmtree(extracted)
+            document = base / 'example 文档.pdf'
+            document.write_bytes(sample_pdf(2))
+            state = base / 'state'
+            try:
+                launch = subprocess.run([sys.executable, str(source / 'plugin/scripts/preview.py'), 'open', str(document), '--state-dir', str(state)], capture_output=True, text=True, encoding='utf-8', timeout=30)
+                self.assertEqual(launch.returncode, 0, launch.stderr)
+                self.assertEqual(get(json.loads(launch.stdout)['url'] + 'document.pdf')[1], document.read_bytes())
+            finally:
+                cli(state, 'stop', '--all')
+
+    def test_cli_failure_is_reported(self):
+        installer = module_at('installer_failure', PLUGIN / 'install.py')
+        with tempfile.TemporaryDirectory(prefix='pdf-install-failure-') as temporary:
+            failure = subprocess.CompletedProcess([], 1, stdout='', stderr='marketplace registration failed')
+            with patch.object(installer.subprocess, 'run', return_value=failure):
+                with self.assertRaisesRegex(RuntimeError, 'marketplace registration failed'):
+                    installer.install(Path(temporary) / 'profile', 'codex executable')
+
+
 class PackageTests(unittest.TestCase):
     def test_release_contains_no_documents_or_state(self):
         builder = module_at('builder', ROOT / 'scripts/build_release.py')
@@ -166,26 +182,15 @@ class PackageTests(unittest.TestCase):
                 for name in archive.namelist():
                     self.assertFalse(name.endswith(('.pdf', '.tex', '.log', '.lock', '.pyc')))
                     self.assertNotIn('__pycache__', name)
+                    self.assertFalse(name.endswith(('open-pdf.sh', 'open-pdf.command', 'open-pdf.cmd', 'desktop_open.py')))
+                self.assertIn('codex-pdf-previewer/install.py', archive.namelist())
+                self.assertIn('codex-pdf-previewer/INSTALL.md', archive.namelist())
             self.assertFalse(report['documents_included'])
         with self.assertRaises(ValueError):
             builder.audit_payload('assets/reader/private.pdf', b'%PDF-1.4')
         with self.assertRaises(ValueError):
             builder.audit_payload('README.md', b'/Users/example/private-file')
 
-    def test_system_downloads_have_correct_launchers(self):
-        builder = module_at('builder', ROOT / 'scripts/build_release.py')
-        with tempfile.TemporaryDirectory(prefix='pdf-platform-packages-') as temporary:
-            reports = builder.build_all(Path(temporary))
-            self.assertEqual(len(reports), 4)
-            self.assertEqual(len((Path(temporary) / 'SHA256SUMS').read_text().splitlines()), 4)
-            for report in reports:
-                with zipfile.ZipFile(report['archive']) as archive:
-                    names = set(archive.namelist())
-                    for platform, launcher in builder.LAUNCHERS.items():
-                        expected = report['platform'] in ('universal', platform)
-                        self.assertEqual('codex-pdf-previewer/' + launcher in names, expected)
-                        if expected and launcher.endswith(('.sh', '.command')):
-                            self.assertTrue(archive.getinfo('codex-pdf-previewer/' + launcher).external_attr >> 16 & 0o111)
 
 
 if __name__ == '__main__':

@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "codex-pdf-previewer",
-  "version": "1.3.0",
-  "description": "Preview local PDFs with continuous scrolling, selectable text and independent high-resolution sampling.",
+  "version": "1.4.0",
+  "description": "Open attached and local PDFs in Codex with high-resolution rendering.",
   "keywords": [
     "pdf",
     "latex",
@@ -14,13 +14,13 @@
       "interface": {
         "displayName": "Codex PDF Previewer",
         "shortDescription": "Sharper local PDF previews for Codex",
-        "longDescription": "Read local PDFs with continuous scrolling, selectable text and independent high-resolution sampling. Bundled PDF.js, 150% default zoom and 3x default sampling. Runs locally on macOS, Windows and Linux with Python 3.10+.",
+        "longDescription": "High-resolution PDF previews inside Codex. Open attached or local files, scroll continuously and copy text. Runs locally on macOS, Windows and Linux with Python 3.10+.",
         "category": "Productivity",
         "capabilities": [
           "Read"
         ],
         "defaultPrompt": [
-          "Use Codex PDF Previewer to open a local PDF."
+          "Open the attached or selected PDF inside Codex."
         ]
       }
     }

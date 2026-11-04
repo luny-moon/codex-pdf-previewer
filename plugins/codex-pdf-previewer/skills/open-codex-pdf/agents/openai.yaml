@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex PDF Previewer"
-  short_description: "连续滚动阅读本地 PDF，独立超清采样，支持文字复制与页码跳转"
-  default_prompt: "Use $open-codex-pdf to open a local PDF."
+  short_description: "在 Codex 内打开附件或本地 PDF，高清预览、连续滚动与文字复制"
+  default_prompt: "Use $open-codex-pdf to open the attached or selected PDF inside Codex."

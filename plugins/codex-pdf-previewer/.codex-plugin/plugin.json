@@ -1,7 +1,7 @@
 {
   "name": "codex-pdf-previewer",
-  "version": "1.3.0",
-  "description": "Local high-resolution PDF preview with continuous scrolling and selectable text.",
+  "version": "1.4.0",
+  "description": "Open attached and local PDFs in Codex with high-resolution rendering.",
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex PDF Previewer",
@@ -11,7 +11,7 @@
       "Read"
     ],
     "defaultPrompt": [
-      "Use Codex PDF Previewer to open a local PDF."
+      "Open the attached or selected PDF inside Codex."
     ]
   }
 }
