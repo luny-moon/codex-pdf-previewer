@@ -234,6 +234,7 @@ async function load(file, previousNumber) {
   ui.stack.replaceChildren(...records.map(record => record.element));
   pdf = source;
   selectedFile = file;
+  document.body.dataset.sourceKind = file ? 'file' : 'server';
   if (downloadObjectUrl) URL.revokeObjectURL(downloadObjectUrl);
   downloadObjectUrl = file ? URL.createObjectURL(file) : null;
   ui.download.href = downloadObjectUrl || '/document.pdf';

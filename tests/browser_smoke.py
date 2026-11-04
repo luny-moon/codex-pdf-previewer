@@ -74,6 +74,7 @@ def main():
                     page.get_by_text(local.name, exact=True).wait_for()
                     ready(1)
                     assert page.locator('.pdf-page').count() == 2
+                    assert page.locator('body').get_attribute('data-source-kind') == 'file'
                     assert page.locator('#refresh').inner_text() == '重新选择'
                     with page.expect_download() as download:
                         page.locator('#download').click()
@@ -134,6 +135,7 @@ def main():
                     page.get_by_text(document.name, exact=True).wait_for()
                     ready(1)
                     assert page.locator('.pdf-page').count() == 5
+                    assert page.locator('body').get_attribute('data-source-kind') == 'server'
                     assert not errors, errors
                     output = ROOT / 'build'
                     output.mkdir(exist_ok=True)
