@@ -1,10 +1,10 @@
 {
-  "name": "hd-pdf-preview-plugins",
-  "interface": {"displayName": "HD PDF Preview"},
+  "name": "codex-pdf-previewer-marketplace",
+  "interface": {"displayName": "Codex PDF Previewer"},
   "plugins": [
     {
-      "name": "hd-pdf-preview",
-      "source": {"source": "local", "path": "./plugins/hd-pdf-preview"},
+      "name": "codex-pdf-previewer",
+      "source": {"source": "local", "path": "./plugins/codex-pdf-previewer"},
       "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
       "category": "Productivity"
     }

@@ -1,114 +1,157 @@
-# HD PDF Preview / 高清 PDF 预览
+# codex-pdf-previewer
 
-A Codex desktop plugin for local PDFs with continuous scrolling, selectable
-text, and high-resolution canvas sampling independent of application UI zoom.
+**Are you tired of blurry PDF previews in Codex, especially on a large monitor?**
 
-- 150% zoom and 3x sampling by default; fit-width and 1x/2x/3x controls.
-- Page navigation, text copying, refresh and original-PDF download.
-- Nearby-page rendering with canvas memory limits.
-- One reusable session per document; separate loopback ports for different files.
-- Python standard library only; PDF.js 5.6.205 is bundled.
+`codex-pdf-previewer` is a local plugin that gives you control over PDF rendering
+resolution. It uses PDF.js with independent 1x, 2x and 3x canvas sampling, so you
+can render vector text, equations and fine lines at a higher resolution without
+changing the size of the whole Codex interface.
 
-## Install in Codex
+The reader opens beside your chat, with continuous scrolling, selectable text,
+page navigation, fit-width and a refresh button. It runs on your computer and
+reads your local PDF directly.
 
-With a current Codex CLI installed:
+## See the difference
+
+These two original, single-page PDFs were made for the examples. They contain
+no personal manuscript material. For a fair comparison, use the same document,
+page, zoom, window size and display scaling in both previews.
+
+### Example 1: type, equations and small print
+
+[Download the demonstration PDF](docs/demos/typography-demo.pdf)
+
+This specimen contains 7-12 pt text, superscripts, subscripts and a small table.
+Compare letter edges, indices and the smallest labels on your own display.
+
+<table>
+<tr><th>Codex default preview</th><th>codex-pdf-previewer</th></tr>
+<tr>
+<td><a href="docs/comparisons/typography-before.png"><img src="docs/comparisons/typography-before.png" alt="Default Codex preview of the typography demo, captured on a large display" width="560"></a></td>
+<td><a href="docs/comparisons/typography-after.png"><img src="docs/comparisons/typography-after.png" alt="The same typography demo in codex-pdf-previewer, captured on a large display" width="560"></a></td>
+</tr>
+</table>
+
+Real screenshots supplied from a large display. The original image pixels
+are preserved; click either image to inspect the full-resolution capture.
+
+### Example 2: fine lines and chart detail
+
+[Download the demonstration PDF](docs/demos/vector-detail-demo.pdf)
+
+This specimen contains vector curves, a dense grid, small axis labels and a
+0.20-1.00 pt line-width ladder. Compare thin strokes and grid intersections.
+
+<!-- Insert the user's real large-display before/after screenshots here. -->
+
+Actual appearance depends on the source PDF, zoom and display scaling. The
+comparisons use real screen captures; no simulated blur is used as a Codex
+baseline. Higher sampling improves vector rendering, but cannot restore detail
+that is missing from an already blurry scanned PDF.
+
+## Download for your system
+
+All downloads require **Python 3.10 or newer**. These are portable plugin ZIPs,
+not native `.dmg` or `.exe` installers. Each system package includes its matching
+launcher; the universal ZIP includes all three launchers.
+
+| System | Download | Python command |
+| --- | --- | --- |
+| macOS | [Download for macOS](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-macos.zip) | `python3` |
+| Windows | [Download for Windows](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-windows.zip) | `py -3` or `python` |
+| Linux | [Download for Linux](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-linux.zip) | `python3` |
+
+[Universal ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0.zip)
+· [SHA-256 checksums](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/SHA256SUMS)
+· [Release notes](https://github.com/luny-moon/codex-pdf-previewer/releases/tag/v1.2.0)
+
+This repository is currently **private**. Sign in with an account that has
+repository access to view the examples or download the release assets.
+
+## Use it in Codex
+
+With a current Codex CLI installed, add the marketplace and install the plugin:
 
 ```text
-codex plugin marketplace add luny-moon/hd-pdf-preview
-codex plugin add hd-pdf-preview@hd-pdf-preview-plugins
+codex plugin marketplace add luny-moon/codex-pdf-previewer
+codex plugin add codex-pdf-previewer@codex-pdf-previewer-marketplace
 ```
 
-Start a new Codex desktop chat and ask:
+Start a new Codex desktop chat and say:
 
-> Use HD PDF Preview to open my local PDF at this path: …
+> Use codex-pdf-previewer to open this local PDF: /path/to/document.pdf
 
-Or invoke `$open-hd-pdf`. The skill resolves its installed package, starts
-the reader, and displays the returned URL in the built-in browser. A matching
-open reader can be reused. Plugin availability depends on your Codex version;
-the launcher also works standalone. See the [official packaging guide](https://developers.openai.com/plugins/build/plugins).
+You can also invoke `$open-codex-pdf`. The plugin starts a local reader and
+opens its URL in Codex's built-in browser. If that reader is already open,
+it can reuse the same tab. The browser's own address and annotation toolbar
+remain part of Codex.
 
-## Platforms and standalone use
+Default settings are **150% zoom** and **3x sampling**. Change them independently
+in the reader. After recompiling or replacing your PDF, click **刷新** to reread
+it. The plugin does not compile TeX or modify your document.
 
-Requires **Python 3.10+** and a modern desktop browser. CI runs the launcher
-lifecycle tests and actual Chromium rendering on **macOS, Windows and Linux**,
-including filenames with spaces and non-ASCII characters. Python 3.13 is also
-tested on Linux. These checks cover the Python server and browser reader;
-they do not automate the Codex desktop app itself.
+## Use it on its own
 
-Clone the repository and run from its root:
+Extract a downloaded ZIP and run from its `codex-pdf-previewer` directory.
 
 macOS / Linux:
 
 ```bash
-python3 plugins/hd-pdf-preview/scripts/preview.py open "/path/to/document.pdf"
+python3 scripts/preview.py open "/path/to/document.pdf"
 ```
 
 Windows PowerShell:
 
 ```powershell
-py -3 plugins/hd-pdf-preview/scripts/preview.py open "C:\Documents\sample.pdf"
+py -3 scripts/preview.py open "C:\Documents\sample.pdf"
 ```
 
-`python` is also suitable on Windows if it points to Python 3.10 or newer.
-Open the JSON result's `url` in a browser. The command itself does not open a
-browser window. Use the same interpreter and script with `status` or
-`stop <pdf-path>` to manage sessions. `stop --all` ends all plugin-managed
-sessions. After replacing a PDF, click **刷新** in the reader.
+Open the JSON result's `url` in a modern browser. The launcher prints the URL;
+it does not open a browser window by itself. The platform ZIPs also include
+`open-pdf.command`, `open-pdf.cmd` or `open-pdf.sh` for the same operation.
+
+Use the same Python command and script with `status`, `stop <pdf-path>` or
+`stop --all` to manage plugin-owned sessions. Different documents receive
+separate loopback ports. Reopening the same document reuses a live session.
+
+## Local files stay local
+
+The reader listens only on `127.0.0.1`. It serves the selected PDF and packaged
+assets, without a general file browser or upload service. It does not execute
+PDF JavaScript or send telemetry. Other processes on your computer can access
+a running local reader, so stop a session when finished with a sensitive file.
+
+Session records and logs are kept outside the plugin:
 
 | System | Default session-data directory |
 | --- | --- |
-| macOS | `~/Library/Application Support/codex-hd-pdf-preview` |
-| Windows | `%LOCALAPPDATA%\codex-hd-pdf-preview` |
-| Linux | `$XDG_STATE_HOME/codex-hd-pdf-preview`, default `~/.local/state/codex-hd-pdf-preview` |
+| macOS | `~/Library/Application Support/codex-pdf-previewer` |
+| Windows | `%LOCALAPPDATA%\codex-pdf-previewer` |
+| Linux | `$XDG_STATE_HOME/codex-pdf-previewer`, default `~/.local/state/codex-pdf-previewer` |
 
-`--state-dir <directory>` overrides the location. Records contain local file
-paths, process metadata and a shutdown token; logs also stay in this directory.
-Keep this data private. POSIX permissions apply on macOS/Linux; Windows uses
-the directory's inherited user ACLs. No systemd service or native binary is required.
-
-## Privacy
-
-The package contains code, instructions and runtime resources. **No user PDF,
-TeX source, document screenshot, session record or log is included.** Tests
-generate a small synthetic PDF in a temporary directory.
-
-The server binds only to `127.0.0.1` and provides the selected PDF plus an
-allowlist of packaged assets. It does not expose directory browsing or a
-general file API. PDF bytes are not uploaded, PDF JavaScript is not executed,
-and the reader has no telemetry. Other processes on the same computer can
-access a running loopback reader; stop it when finished with a sensitive
-document. Shutdown requires the per-session token stored in local state.
-
-Release packaging uses a fixed file allowlist and audits the ZIP. Generated
-documents, screenshots, session data and developer test artifacts are excluded.
+These records contain local paths and a shutdown token; keep them private.
+`--state-dir` overrides the location. Plugin ZIPs contain no user PDFs, source
+manuscripts, screenshots, session records or logs. The two example PDFs live
+separately in this repository's `docs/demos/` directory.
 
 ## Development
 
+The runtime uses the Python standard library and bundled PDF.js. CI checks
+service startup, Unicode paths, concurrent opens, archive contents and actual
+Chromium rendering on macOS, Windows and Linux; it also tests Python 3.13 on Linux.
+
 ```text
 python -m unittest discover -s tests -v
-python scripts/build_release.py --out-dir build
+python scripts/build_release.py --out-dir build --all-platforms
 ```
 
-Optional browser verification:
-
-```text
-python -m pip install playwright
-python -m playwright install chromium
-python tests/browser_smoke.py
-```
-
-The release ZIP contains the installable `hd-pdf-preview/` folder. The source
-repository additionally contains the marketplace catalog and CI tests.
-
-## 中文说明
-
-在 Codex 桌面版中安装后，可以说：“用高清 PDF 预览打开这个本地 PDF”，
-并附上文件路径。默认 150% 缩放与 3 倍采样，支持连续滚动、页码跳转、
-文字复制和刷新。支持 macOS、Windows、Linux 的 Python 3.10+ 环境。
-Windows 使用 `py -3` 或 `python`，macOS/Linux 通常使用 `python3`。
-文件仅在本机读取，发布包不包含用户论文、截图、个人路径或运行记录。
+For the browser checks, install Playwright and Chromium, then run
+`python tests/browser_smoke.py`. To regenerate the original example documents,
+install ReportLab and run `python scripts/create_demo_pdfs.py`; output goes to
+`build/demo-pdfs/`.
 
 ## License
 
-Original code: [MIT](LICENSE). Bundled PDF.js is Apache-2.0; font and decoder
-notices are preserved. See [third-party notices](plugins/hd-pdf-preview/THIRD_PARTY.md).
+Original code and demonstration documents are available under the [MIT License](LICENSE).
+Bundled PDF.js is Apache-2.0; its font and decoder licenses are retained in
+[third-party notices](plugins/codex-pdf-previewer/THIRD_PARTY.md).

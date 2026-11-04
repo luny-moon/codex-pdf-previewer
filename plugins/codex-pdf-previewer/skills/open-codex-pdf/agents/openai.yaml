@@ -1,4 +1,4 @@
 interface:
-  display_name: "高清 PDF 预览"
+  display_name: "Codex PDF Previewer"
   short_description: "连续滚动阅读本地 PDF，独立超清采样，支持文字复制与页码跳转"
-  default_prompt: "用 $open-hd-pdf 打开当前项目的 build/main.pdf。"
+  default_prompt: "Use $open-codex-pdf to open a local PDF."

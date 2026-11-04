@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -94,14 +95,34 @@ class ReaderTests(unittest.TestCase):
         self.assertNotEqual(mismatch['url'], first['url'])
         self.assertTrue(mismatch['managed'])
 
+    def test_native_system_launcher(self):
+        env = os.environ.copy()
+        state = self.state
+        if sys.platform == 'win32':
+            env['LOCALAPPDATA'] = str(self.base / 'app data')
+            state = Path(env['LOCALAPPDATA']) / 'codex-pdf-previewer'
+            command = [env.get('COMSPEC', 'cmd.exe'), '/d', '/c',
+                       str(PLUGIN / 'open-pdf.cmd'), str(self.document)]
+        else:
+            name = 'open-pdf.command' if sys.platform == 'darwin' else 'open-pdf.sh'
+            command = ['sh', str(PLUGIN / name), str(self.document), '--state-dir', str(state)]
+        try:
+            result = subprocess.run(command, env=env, capture_output=True, text=True,
+                                    encoding='utf-8', timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            session = json.loads(result.stdout)
+            self.assertEqual(get(session['url'] + 'document.pdf')[1], self.document.read_bytes())
+        finally:
+            cli(state, 'stop', '--all')
+
     def test_platform_data_locations(self):
         launcher = module_at('preview', LAUNCHER)
         with patch.object(launcher.sys, 'platform', 'darwin'):
-            self.assertEqual(launcher.default_state_root(), Path.home() / 'Library/Application Support/codex-hd-pdf-preview')
+            self.assertEqual(launcher.default_state_root(), Path.home() / 'Library/Application Support/codex-pdf-previewer')
         with patch.object(launcher.sys, 'platform', 'win32'), patch.dict(os.environ, {'LOCALAPPDATA': str(self.base)}):
-            self.assertEqual(launcher.default_state_root(), self.base / 'codex-hd-pdf-preview')
+            self.assertEqual(launcher.default_state_root(), self.base / 'codex-pdf-previewer')
         with patch.object(launcher.sys, 'platform', 'linux'), patch.dict(os.environ, {'XDG_STATE_HOME': ''}):
-            self.assertEqual(launcher.default_state_root(), Path.home() / '.local/state/codex-hd-pdf-preview')
+            self.assertEqual(launcher.default_state_root(), Path.home() / '.local/state/codex-pdf-previewer')
 
     def test_numeric_loopback_startup_needs_no_dns(self):
         launcher = module_at('preview', LAUNCHER)
@@ -127,6 +148,21 @@ class PackageTests(unittest.TestCase):
             builder.audit_payload('assets/reader/private.pdf', b'%PDF-1.4')
         with self.assertRaises(ValueError):
             builder.audit_payload('README.md', b'/Users/example/private-file')
+
+    def test_system_downloads_have_correct_launchers(self):
+        builder = module_at('builder', ROOT / 'scripts/build_release.py')
+        with tempfile.TemporaryDirectory(prefix='pdf-platform-packages-') as temporary:
+            reports = builder.build_all(Path(temporary))
+            self.assertEqual(len(reports), 4)
+            self.assertEqual(len((Path(temporary) / 'SHA256SUMS').read_text().splitlines()), 4)
+            for report in reports:
+                with zipfile.ZipFile(report['archive']) as archive:
+                    names = set(archive.namelist())
+                    for platform, launcher in builder.LAUNCHERS.items():
+                        expected = report['platform'] in ('universal', platform)
+                        self.assertEqual('codex-pdf-previewer/' + launcher in names, expected)
+                        if expected and launcher.endswith(('.sh', '.command')):
+                            self.assertTrue(archive.getinfo('codex-pdf-previewer/' + launcher).external_attr >> 16 & 0o111)
 
 
 if __name__ == '__main__':

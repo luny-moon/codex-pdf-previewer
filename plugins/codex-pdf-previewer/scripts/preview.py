@@ -41,7 +41,7 @@ def default_state_root():
         base = Path.home() / 'Library/Application Support'
     else:
         base = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
-    return base / 'codex-hd-pdf-preview'
+    return base / 'codex-pdf-previewer'
 
 
 def state_root(value=None):
@@ -102,7 +102,7 @@ def alive(record):
     try:
         url = local_url(record['url'])
         health = request_json(url + 'health.json')
-        return health.get('instance') == record['instance'] and health.get('plugin') == 'hd-pdf-preview'
+        return health.get('instance') == record['instance'] and health.get('plugin') == 'codex-pdf-previewer'
     except (OSError, URLError, ValueError, KeyError, TypeError):
         return False
 
@@ -249,7 +249,7 @@ def serve(args):
                 return
             route = unquote(urlsplit(self.path).path)
             if route == '/health.json':
-                self.send_json({'plugin': 'hd-pdf-preview', 'instance': instance}, head)
+                self.send_json({'plugin': 'codex-pdf-previewer', 'instance': instance}, head)
                 return
             if route == '/meta.json':
                 self.send_json({'name': document.name}, head)

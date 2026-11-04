@@ -1,0 +1,17 @@
+{
+  "name": "codex-pdf-previewer",
+  "version": "1.2.0",
+  "description": "Local high-resolution PDF preview with continuous scrolling and selectable text.",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex PDF Previewer",
+    "shortDescription": "Sharper local PDF previews for Codex",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Use Codex PDF Previewer to open a local PDF."
+    ]
+  }
+}

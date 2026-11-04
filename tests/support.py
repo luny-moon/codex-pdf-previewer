@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.request import ProxyHandler, Request, build_opener
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / 'plugins/hd-pdf-preview'
+PLUGIN = ROOT / 'plugins/codex-pdf-previewer'
 LAUNCHER = PLUGIN / 'scripts/preview.py'
 HTTP = build_opener(ProxyHandler({}))
 
@@ -21,7 +21,7 @@ def sample_pdf(pages=5):
         kids.append(f'{page_id} 0 R')
         objects.append((f'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] '
                         f'/Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >>').encode('ascii'))
-        content = (f'BT /F1 24 Tf 72 680 Td (HD PDF Preview - Sample page {number}) Tj '
+        content = (f'BT /F1 24 Tf 72 680 Td (Codex PDF Previewer - Sample page {number}) Tj '
                    '0 -48 Td /F1 14 Tf (Synthetic test document. No personal information.) Tj ET').encode('ascii')
         objects.append(f'<< /Length {len(content)} >>\nstream\n'.encode('ascii') + content + b'\nendstream')
     objects[1] = (f'<< /Type /Pages /Kids [{" ".join(kids)}] /Count {pages} >>').encode('ascii')

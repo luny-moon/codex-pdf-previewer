@@ -3,6 +3,8 @@
 __pycache__/
 *.py[cod]
 *.pdf
+!docs/demos/typography-demo.pdf
+!docs/demos/vector-detail-demo.pdf
 *.tex
 *.log
 *.lock

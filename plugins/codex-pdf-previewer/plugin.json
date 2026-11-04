@@ -1,0 +1,28 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-pdf-previewer",
+  "version": "1.2.0",
+  "description": "Preview local PDFs with continuous scrolling, selectable text and independent high-resolution sampling.",
+  "keywords": [
+    "pdf",
+    "latex",
+    "preview",
+    "local"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex PDF Previewer",
+        "shortDescription": "Sharper local PDF previews for Codex",
+        "longDescription": "Read local PDFs with continuous scrolling, selectable text and independent high-resolution sampling. Bundled PDF.js, 150% default zoom and 3x default sampling. Runs locally on macOS, Windows and Linux with Python 3.10+.",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "Use Codex PDF Previewer to open a local PDF."
+        ]
+      }
+    }
+  }
+}

@@ -1,5 +1,5 @@
 ---
-name: open-hd-pdf
+name: open-codex-pdf
 description: Open or manage a local high-resolution PDF reader in Codex desktop, with continuous scrolling, selectable text and independent 1–3x sampling. Use for requests to open a PDF in 高清预览 or reuse this reader; not for editing PDF contents or compiling TeX.
 ---
 

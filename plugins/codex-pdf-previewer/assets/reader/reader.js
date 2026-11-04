@@ -213,7 +213,7 @@ async function load() {
     }
     pdf = source;
     pageNumber = Math.max(1,Math.min(previousNumber,pages.length));
-    document.title = `${meta.name} · 连续高清 PDF 预览`;
+    document.title = `${meta.name} · Codex PDF Previewer`;
     layout(null);
     if (pageNumber>1) go(pageNumber);
   } finally {
