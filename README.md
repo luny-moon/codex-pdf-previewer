@@ -11,6 +11,25 @@ The reader opens beside your chat, with continuous scrolling, selectable text,
 page navigation, fit-width and a refresh button. It runs on your computer and
 reads your local PDF directly.
 
+## Download for your system
+
+All downloads require **Python 3.10 or newer**. These are portable plugin ZIPs,
+not native `.dmg` or `.exe` installers. Each system package includes its matching
+launcher; the universal ZIP includes all three launchers.
+
+| System | Download | Python command |
+| --- | --- | --- |
+| macOS | [Download for macOS](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-macos.zip) | `python3` |
+| Windows | [Download for Windows](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-windows.zip) | `py -3` or `python` |
+| Linux | [Download for Linux](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-linux.zip) | `python3` |
+
+[Universal ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0.zip)
+· [SHA-256 checksums](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/SHA256SUMS)
+· [Release notes](https://github.com/luny-moon/codex-pdf-previewer/releases/tag/v1.3.0)
+
+This repository is currently **private**. Sign in with an account that has
+repository access to view the examples or download the release assets.
+
 ## See the difference
 
 The examples use an original text specimen and an excerpt from a published
@@ -62,25 +81,6 @@ Actual appearance depends on the source PDF, zoom and display scaling. The
 comparisons use real screen captures; no simulated blur is used as a Codex
 baseline. Higher sampling improves vector rendering, but cannot restore detail
 that is missing from an already blurry scanned PDF.
-
-## Download for your system
-
-All downloads require **Python 3.10 or newer**. These are portable plugin ZIPs,
-not native `.dmg` or `.exe` installers. Each system package includes its matching
-launcher; the universal ZIP includes all three launchers.
-
-| System | Download | Python command |
-| --- | --- | --- |
-| macOS | [Download for macOS](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-macos.zip) | `python3` |
-| Windows | [Download for Windows](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-windows.zip) | `py -3` or `python` |
-| Linux | [Download for Linux](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-linux.zip) | `python3` |
-
-[Universal ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0.zip)
-· [SHA-256 checksums](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/SHA256SUMS)
-· [Release notes](https://github.com/luny-moon/codex-pdf-previewer/releases/tag/v1.3.0)
-
-This repository is currently **private**. Sign in with an account that has
-repository access to view the examples or download the release assets.
 
 ## Open another PDF in one step
 
