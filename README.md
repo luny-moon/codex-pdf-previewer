@@ -57,16 +57,32 @@ launcher; the universal ZIP includes all three launchers.
 
 | System | Download | Python command |
 | --- | --- | --- |
-| macOS | [Download for macOS](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-macos.zip) | `python3` |
-| Windows | [Download for Windows](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-windows.zip) | `py -3` or `python` |
-| Linux | [Download for Linux](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0-linux.zip) | `python3` |
+| macOS | [Download for macOS](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-macos.zip) | `python3` |
+| Windows | [Download for Windows](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-windows.zip) | `py -3` or `python` |
+| Linux | [Download for Linux](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0-linux.zip) | `python3` |
 
-[Universal ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/codex-pdf-previewer-1.2.0.zip)
-· [SHA-256 checksums](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.2.0/SHA256SUMS)
-· [Release notes](https://github.com/luny-moon/codex-pdf-previewer/releases/tag/v1.2.0)
+[Universal ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/codex-pdf-previewer-1.3.0.zip)
+· [SHA-256 checksums](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.3.0/SHA256SUMS)
+· [Release notes](https://github.com/luny-moon/codex-pdf-previewer/releases/tag/v1.3.0)
 
 This repository is currently **private**. Sign in with an account that has
 repository access to view the examples or download the release assets.
+
+## Open another PDF in one step
+
+Click **打开 PDF** in the reader or drag a PDF into its reading area. You can
+also use Ctrl+O (Cmd+O on macOS) while the page receives keyboard input.
+The chosen file is parsed in this browser tab; its bytes are not uploaded.
+The download link follows the currently displayed file.
+
+For a file chosen this way, **重新选择** opens the picker again so you can read
+a newer version from disk. Reloading the entire browser tab returns to the
+PDF used to start that reader; picked file bytes are not saved to browser storage.
+
+For desktop shortcuts or a file manager's Open With action, use
+`python scripts/desktop_open.py "/path/to/document.pdf"`. This starts the same
+reader in the system's default browser. The in-page picker and drag/drop keep
+you inside the existing Codex browser tab.
 
 ## Use it in Codex
 
@@ -130,6 +146,8 @@ Session records and logs are kept outside the plugin:
 | Linux | `$XDG_STATE_HOME/codex-pdf-previewer`, default `~/.local/state/codex-pdf-previewer` |
 
 These records contain local paths and a shutdown token; keep them private.
+Static reader resources are cached there so an open session survives a plugin
+upgrade; your PDF bytes are not copied into that resource cache.
 `--state-dir` overrides the location. Plugin ZIPs contain no user PDFs, source
 manuscripts, screenshots, session records or logs. The two example PDFs live
 separately in this repository's `docs/demos/` directory.

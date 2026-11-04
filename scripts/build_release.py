@@ -12,7 +12,7 @@ PLUGIN = ROOT / 'plugins/codex-pdf-previewer'
 LAUNCHERS = {'macos': 'open-pdf.command', 'windows': 'open-pdf.cmd', 'linux': 'open-pdf.sh'}
 FILES = {
     'plugin.json', '.codex-plugin/plugin.json', 'README.md', 'LICENSE', 'THIRD_PARTY.md',
-    'scripts/preview.py', 'skills/open-codex-pdf/SKILL.md',
+    'scripts/preview.py', 'scripts/desktop_open.py', 'skills/open-codex-pdf/SKILL.md',
     'skills/open-codex-pdf/agents/openai.yaml',
     'assets/reader/index.html', 'assets/reader/entry.js',
     'assets/reader/reader.js', 'assets/reader/reader.css',

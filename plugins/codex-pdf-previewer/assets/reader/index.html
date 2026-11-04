@@ -12,13 +12,15 @@
   <header>
     <div class="title"><strong>Codex PDF Previewer</strong><span id="filename">正在打开…</span></div>
     <div class="controls">
+      <button id="open" title="选择本机 PDF，也可将文件拖入阅读区">打开 PDF</button>
+      <input id="file" type="file" accept=".pdf,application/pdf" aria-label="选择本机 PDF" hidden>
       <button id="previous" title="上一页" aria-label="上一页">‹</button>
       <label class="pages"><input id="page" type="number" min="1" value="1" aria-label="页码"><span id="pages">/ —</span></label>
       <button id="next" title="下一页" aria-label="下一页">›</button>
       <label><span class="sr-only">缩放</span><select id="zoom" aria-label="缩放"><option value="fit">适合宽度</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select></label>
       <label><span class="sr-only">清晰度</span><select id="quality" aria-label="清晰度"><option value="1">标准 · 1倍</option><option value="2">高清 · 2倍</option><option value="3" selected>超清 · 3倍</option></select></label>
       <button id="refresh" title="重新读取已编译的 PDF">刷新</button>
-      <a href="/document.pdf" download>下载原 PDF</a>
+      <a id="download" href="/document.pdf" download>下载原 PDF</a>
     </div>
   </header>
   <main id="viewport" aria-label="连续 PDF 页面" tabindex="0">

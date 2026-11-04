@@ -7,8 +7,10 @@ import json
 import mimetypes
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from contextlib import contextmanager
@@ -51,6 +53,31 @@ def state_root(value=None):
         result = default_state_root()
     result.mkdir(parents=True, exist_ok=True, mode=0o700)
     return result
+
+
+def runtime_assets(state):
+    """Keep active readers usable when a plugin manager replaces its cache."""
+    digest = hashlib.sha256()
+    for folder in (WEB, PDFJS):
+        for path in sorted(folder.rglob('*')):
+            if path.is_file():
+                name = folder.name + '/' + path.relative_to(folder).as_posix()
+                digest.update(name.encode('utf-8') + b'\0')
+                digest.update(hashlib.sha256(path.read_bytes()).digest())
+    parent = state / 'runtime-assets'
+    parent.mkdir(parents=True, exist_ok=True)
+    target = parent / digest.hexdigest()[:24]
+    if not target.exists():
+        with tempfile.TemporaryDirectory(prefix='.bundle-', dir=parent) as staging:
+            bundle = Path(staging) / 'bundle'
+            shutil.copytree(WEB, bundle / 'reader')
+            shutil.copytree(PDFJS, bundle / 'pdfjs')
+            try:
+                bundle.rename(target)
+            except OSError:
+                if not target.is_dir():
+                    raise
+    return target / 'reader', target / 'pdfjs'
 
 
 def document_path(value):
@@ -213,6 +240,7 @@ def serve(args):
     if not (PDFJS / 'build/pdf.mjs').is_file():
         raise RuntimeError('Bundled PDF.js is missing; reinstall the complete plugin folder')
     state = state_root(args.state_dir)
+    web, library = runtime_assets(state)
     path = record_path(state, document)
     instance = args.instance or secrets.token_hex(16)
     shutdown_token = secrets.token_hex(32)
@@ -258,10 +286,10 @@ def serve(args):
             if route == '/document.pdf':
                 target = document
             elif route in ('/', '/index.html', '/entry.js', '/reader.js', '/reader.css'):
-                target = WEB / ('index.html' if route == '/' else route[1:])
+                target = web / ('index.html' if route == '/' else route[1:])
             elif route.startswith('/pdfjs/'):
-                candidate = (PDFJS / route[len('/pdfjs/'):]).resolve()
-                if candidate.is_relative_to(PDFJS.resolve()):
+                candidate = (library / route[len('/pdfjs/'):]).resolve()
+                if candidate.is_relative_to(library.resolve()):
                     target = candidate
             if target is None or not target.is_file():
                 self.send_error(404)

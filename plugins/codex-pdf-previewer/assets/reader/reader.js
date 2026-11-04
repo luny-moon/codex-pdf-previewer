@@ -1,7 +1,7 @@
 import { getDocument, GlobalWorkerOptions, TextLayer } from '/pdfjs/build/pdf.mjs';
 
 GlobalWorkerOptions.workerSrc = '/pdfjs/build/pdf.worker.mjs';
-const ui = Object.fromEntries(['page','pages','previous','next','zoom','quality','refresh','status','viewport','filename'].map(id => [id, document.getElementById(id)]));
+const ui = Object.fromEntries(['open','file','download','page','pages','previous','next','zoom','quality','refresh','status','viewport','filename'].map(id => [id, document.getElementById(id)]));
 ui.stack = document.getElementById('page-stack');
 const key = 'local-pdf-preview-settings-v1';
 let saved = {};
@@ -12,6 +12,8 @@ ui.quality.value = ['1','2','3'].includes(saved.quality) ? saved.quality : '3';
 let pdf = null, pages = [], pageNumber = 1, documentVersion = 0;
 let wanted = [], pumpPromise = null, frame = 0, resizeTimer;
 let lastDpr = window.devicePixelRatio || 1;
+let selectedFile = null, downloadObjectUrl = null;
+let loadTail = Promise.resolve(), pendingLoads = 0, pickerKeepsPage = false;
 const cancelled = error => ['RenderingCancelledException','AbortException'].includes(error?.name);
 const topOf = record => ui.stack.offsetTop + record.element.offsetTop;
 
@@ -188,10 +190,39 @@ function makePage(number,base) {
   return {number,base,element,canvas,text,state:'idle',version:0,renderTask:null,textTask:null,proxy:null};
 }
 
-async function load() {
-  const previousNumber = pageNumber;
+function requestLoad(file = selectedFile, keepPage = true) {
+  pendingLoads++;
   ui.refresh.disabled = true;
+  const task = loadTail.catch(() => {}).then(() => load(file, keepPage ? pageNumber : 1));
+  loadTail = task;
+  return task.finally(() => {
+    pendingLoads--;
+    ui.refresh.disabled = pendingLoads > 0;
+  });
+}
+
+async function load(file, previousNumber) {
   ui.status.textContent = '正在准备连续页面…';
+  const meta = file ? {name:file.name} : await fetch('/meta.json').then(response => {
+    if (!response.ok) throw new Error('无法读取当前文件信息');
+    return response.json();
+  });
+  const input = file ? {data:new Uint8Array(await file.arrayBuffer())} : {url:`/document.pdf?t=${Date.now()}`};
+  const loading = getDocument({...input,isEvalSupported:false,cMapUrl:'/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/pdfjs/standard_fonts/',wasmUrl:'/pdfjs/wasm/'});
+  let source;
+  const records = [];
+  try {
+    source = await loading.promise;
+    for (let number=1;number<=source.numPages;number++) {
+      const page = await source.getPage(number);
+      records.push(makePage(number,page.getViewport({scale:1})));
+    }
+  } catch (error) {
+    await loading.destroy().catch(() => {});
+    throw error;
+  }
+  // Parse the candidate before replacing the current reader. A bad file
+  // must leave the displayed document, its name and download intact.
   const old = pdf;
   pdf = null;
   documentVersion++;
@@ -199,26 +230,35 @@ async function load() {
   for (const record of pages) invalidate(record);
   if (pumpPromise) await pumpPromise;
   if (old) await old.destroy();
-  pages = [];
-  ui.stack.replaceChildren();
-  try {
-    const meta = await fetch('/meta.json').then(response=>response.json());
-    ui.filename.textContent = meta.name;
-    const source = await getDocument({url:`/document.pdf?t=${Date.now()}`,isEvalSupported:false,cMapUrl:'/pdfjs/cmaps/',cMapPacked:true,standardFontDataUrl:'/pdfjs/standard_fonts/',wasmUrl:'/pdfjs/wasm/'}).promise;
-    for (let number=1;number<=source.numPages;number++) {
-      const page = await source.getPage(number);
-      const record = makePage(number,page.getViewport({scale:1}));
-      pages.push(record);
-      ui.stack.append(record.element);
-    }
-    pdf = source;
-    pageNumber = Math.max(1,Math.min(previousNumber,pages.length));
-    document.title = `${meta.name} · Codex PDF Previewer`;
-    layout(null);
-    if (pageNumber>1) go(pageNumber);
-  } finally {
-    ui.refresh.disabled = false;
+  pages = records;
+  ui.stack.replaceChildren(...records.map(record => record.element));
+  pdf = source;
+  selectedFile = file;
+  if (downloadObjectUrl) URL.revokeObjectURL(downloadObjectUrl);
+  downloadObjectUrl = file ? URL.createObjectURL(file) : null;
+  ui.download.href = downloadObjectUrl || '/document.pdf';
+  ui.download.download = meta.name;
+  ui.filename.textContent = meta.name;
+  ui.refresh.textContent = file ? '重新选择' : '刷新';
+  ui.refresh.title = file ? '重新选择文件以读取磁盘上的最新版本' : '重新读取已编译的 PDF';
+  pageNumber = Math.max(1,Math.min(previousNumber,pages.length));
+  ui.page.value = pageNumber;
+  document.title = `${meta.name} · Codex PDF Previewer`;
+  layout(null);
+  if (pageNumber>1) go(pageNumber);
+}
+
+function chooseFile(keepPage = false) {
+  pickerKeepsPage = keepPage;
+  ui.file.click();
+}
+
+async function openLocalFile(file, keepPage = false) {
+  if (!file || (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf')) {
+    throw new Error('请选择一个 PDF 文件');
   }
+  if (!file.size) throw new Error('这个 PDF 文件为空');
+  return requestLoad(file, keepPage && file.name === selectedFile?.name);
 }
 
 function go(number) {
@@ -237,7 +277,34 @@ ui.page.addEventListener('keydown',event=>{if(event.key==='Enter')go(ui.page.val
 ui.page.addEventListener('blur',updateToolbar);
 ui.zoom.addEventListener('change',()=>{save();if(pdf)layout(capturePosition());});
 ui.quality.addEventListener('change',()=>{save();for(const record of pages)invalidate(record);schedule();});
-ui.refresh.addEventListener('click',()=>load().catch(report));
+ui.open.addEventListener('click',()=>chooseFile());
+ui.file.addEventListener('change',()=>{
+  const file = ui.file.files[0], keepPage = pickerKeepsPage;
+  ui.file.value = '';
+  if (file) openLocalFile(file,keepPage).catch(report);
+});
+ui.refresh.addEventListener('click',()=>{
+  if (selectedFile) chooseFile(true);
+  else requestLoad().catch(report);
+});
+document.addEventListener('dragover',event=>{
+  if ([...(event.dataTransfer?.types || [])].includes('Files')) {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    ui.viewport.classList.add('drop-target');
+  }
+});
+document.addEventListener('dragleave',event=>{
+  if (!event.relatedTarget) ui.viewport.classList.remove('drop-target');
+});
+document.addEventListener('drop',event=>{
+  const files = event.dataTransfer?.files;
+  if (!files?.length) return;
+  event.preventDefault();
+  ui.viewport.classList.remove('drop-target');
+  if (files.length !== 1) {report(new Error('请每次拖入一个 PDF 文件'));return;}
+  openLocalFile(files[0]).catch(report);
+});
 window.addEventListener('resize',()=>{
   clearTimeout(resizeTimer);
   resizeTimer=setTimeout(()=>{
@@ -250,8 +317,13 @@ window.addEventListener('resize',()=>{
   },150);
 });
 document.addEventListener('keydown',event=>{
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase()==='o') {
+    event.preventDefault();
+    chooseFile();
+    return;
+  }
   if (event.target.matches('input,select') || event.ctrlKey || event.metaKey || event.altKey) return;
   if(event.key==='ArrowRight'){event.preventDefault();go(pageNumber+1);}
   if(event.key==='ArrowLeft'){event.preventDefault();go(pageNumber-1);}
 });
-load().catch(report);
+requestLoad().catch(report);

@@ -3,6 +3,7 @@ import importlib.util
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,28 @@ class ReaderTests(unittest.TestCase):
             self.assertEqual(get(session['url'] + 'document.pdf')[1], self.document.read_bytes())
         finally:
             cli(state, 'stop', '--all')
+
+    def test_desktop_entry_prepares_local_url_without_browser(self):
+        result = subprocess.run([sys.executable, str(PLUGIN / 'scripts/desktop_open.py'),
+                                 '--print-url', '--state-dir', str(self.state), str(self.document)],
+                                capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        url = result.stdout.strip()
+        self.assertTrue(url.startswith('http://127.0.0.1:'))
+        self.assertEqual(get(url + 'document.pdf')[1], self.document.read_bytes())
+
+    def test_reader_survives_plugin_cache_replacement(self):
+        copied = self.base / 'temporary plugin'
+        shutil.copytree(PLUGIN, copied)
+        result = subprocess.run([sys.executable, str(copied / 'scripts/preview.py'),
+                                 'open', str(self.document), '--state-dir', str(self.state)],
+                                capture_output=True, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        session = json.loads(result.stdout)
+        expected = (copied / 'assets/reader/reader.js').read_bytes()
+        copied.rename(self.base / 'replaced plugin')
+        self.assertEqual(get(session['url'] + 'reader.js')[1], expected)
+        self.assertEqual(get(session['url'] + 'pdfjs/build/pdf.worker.mjs')[0], 200)
 
     def test_platform_data_locations(self):
         launcher = module_at('preview', LAUNCHER)

@@ -9,6 +9,22 @@ In a new Codex desktop chat, use `$open-codex-pdf` and give a local PDF path.
 The default is 150% zoom with 3x sampling. Files are read on your computer;
 no PDF is uploaded or modified. Python 3.10+ is required, and PDF.js is bundled.
 
+## Open another PDF in one step
+
+Click **打开 PDF** in the reader or drag a PDF into its reading area. You can
+also use Ctrl+O (Cmd+O on macOS) while the page receives keyboard input.
+The chosen file is parsed in this browser tab; its bytes are not uploaded.
+The download link follows the currently displayed file.
+
+For a file chosen this way, **重新选择** opens the picker again so you can read
+a newer version from disk. Reloading the entire browser tab returns to the
+PDF used to start that reader; picked file bytes are not saved to browser storage.
+
+For desktop shortcuts or a file manager's Open With action, use
+`python scripts/desktop_open.py "/path/to/document.pdf"`. This starts the same
+reader in the system's default browser. The in-page picker and drag/drop keep
+you inside the existing Codex browser tab.
+
 ## Standalone commands
 
 macOS / Linux:
