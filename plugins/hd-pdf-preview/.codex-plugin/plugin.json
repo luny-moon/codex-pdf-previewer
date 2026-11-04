@@ -1,0 +1,13 @@
+{
+  "name": "hd-pdf-preview",
+  "version": "1.1.0",
+  "description": "Local high-resolution PDF preview with continuous scrolling and selectable text.",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "高清 PDF 预览",
+    "shortDescription": "本地 PDF 连续阅读、超清采样和文字复制",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "defaultPrompt": ["用高清 PDF 预览打开当前项目的 build/main.pdf"]
+  }
+}

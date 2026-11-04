@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>高清 PDF 预览</title>
+  <link rel="stylesheet" href="/pdfjs/web/pdf_viewer.css">
+  <link rel="stylesheet" href="./reader.css">
+  <script defer src="./entry.js"></script>
+</head>
+<body>
+  <header>
+    <div class="title"><strong>高清 PDF 预览</strong><span id="filename">正在打开…</span><span class="mode">连续滚动</span></div>
+    <div class="controls">
+      <button id="previous" title="上一页" aria-label="上一页">‹</button>
+      <label class="pages"><input id="page" type="number" min="1" value="1" aria-label="页码"><span id="pages">/ —</span></label>
+      <button id="next" title="下一页" aria-label="下一页">›</button>
+      <label><span class="sr-only">缩放</span><select id="zoom" aria-label="缩放"><option value="fit">适合宽度</option><option value="1">100%</option><option value="1.25">125%</option><option value="1.5">150%</option><option value="2">200%</option><option value="3">300%</option></select></label>
+      <label><span class="sr-only">清晰度</span><select id="quality" aria-label="清晰度"><option value="1">标准 · 1倍</option><option value="2">高清 · 2倍</option><option value="3" selected>超清 · 3倍</option></select></label>
+      <button id="refresh" title="重新读取已编译的 PDF">刷新</button>
+      <a href="/document.pdf" download>下载原 PDF</a>
+    </div>
+  </header>
+  <main id="viewport" aria-label="连续 PDF 页面" tabindex="0">
+    <div id="page-stack" aria-label="连续阅读"></div>
+  </main>
+  <footer><span id="status" role="status" aria-live="polite">正在加载本地 PDF…</span><span>文件仅在本机读取</span></footer>
+</body>
+</html>

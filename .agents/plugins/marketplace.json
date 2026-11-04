@@ -1,0 +1,12 @@
+{
+  "name": "hd-pdf-preview-plugins",
+  "interface": {"displayName": "HD PDF Preview"},
+  "plugins": [
+    {
+      "name": "hd-pdf-preview",
+      "source": {"source": "local", "path": "./plugins/hd-pdf-preview"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
+      "category": "Productivity"
+    }
+  ]
+}
