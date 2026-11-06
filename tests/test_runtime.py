@@ -202,6 +202,7 @@ class PackageTests(unittest.TestCase):
                 self.assertIn('codex-pdf-previewer/INSTALL.md', archive.namelist())
                 self.assertIn('codex-pdf-previewer/scripts/menu_open.py', archive.namelist())
                 self.assertIn('codex-pdf-previewer/scripts/linux_menu.py', archive.namelist())
+                self.assertIn('codex-pdf-previewer/scripts/macos_menu.py', archive.namelist())
                 manifest = json.loads(archive.read('codex-pdf-previewer/plugin.json'))
                 legacy = json.loads(archive.read('codex-pdf-previewer/.codex-plugin/plugin.json'))
                 self.assertEqual(manifest['version'], legacy['version'])

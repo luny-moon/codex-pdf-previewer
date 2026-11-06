@@ -16,10 +16,12 @@ MARKETPLACE = 'codex-pdf-previewer-local'
 
 
 def configure_menu(package_root, codex_home, launcher=None):
-    if sys.platform != 'linux':
-        return {'status': 'skipped', 'reason': 'PDF menu integration currently supports Linux'}
-    spec = importlib.util.spec_from_file_location('codex_pdf_linux_menu',
-                                                 package_root / 'scripts/linux_menu.py')
+    modules = {'linux': 'linux_menu.py', 'darwin': 'macos_menu.py'}
+    module_name = modules.get(sys.platform)
+    if module_name is None:
+        return {'status': 'skipped', 'reason': 'This Codex client does not expose a Windows PDF menu extension'}
+    spec = importlib.util.spec_from_file_location('codex_pdf_menu',
+                                                 package_root / 'scripts' / module_name)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.install_menu(package_root, codex_home, launcher)
@@ -85,8 +87,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--codex', help='Path to the Codex CLI if it is not on PATH')
     parser.add_argument('--codex-home', type=Path, help='Use a specific Codex profile')
-    parser.add_argument('--gui-launcher', type=Path, help='Absolute Codex GUI launcher path for the Linux PDF menu')
-    parser.add_argument('--no-menu', action='store_true', help='Install the reader without the Linux PDF menu')
+    parser.add_argument('--gui-launcher', type=Path, help='Absolute Codex GUI launcher or macOS .app bundle path')
+    parser.add_argument('--no-menu', action='store_true', help='Install the reader without OS PDF menu integration')
     args = parser.parse_args()
     try:
         print(json.dumps(install(args.codex_home, args.codex, not args.no_menu, args.gui_launcher),

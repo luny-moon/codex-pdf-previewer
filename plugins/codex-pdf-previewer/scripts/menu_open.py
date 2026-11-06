@@ -38,7 +38,11 @@ def open_document(pdf, launcher, state_dir=None, prepare_only=False):
     if not gui.is_absolute():
         raise ValueError('The Codex GUI launcher must be an absolute path')
     gui = gui.resolve(strict=True)
-    if not gui.is_file() or not os.access(gui, os.X_OK):
+    if sys.platform == 'darwin':
+        if (not gui.is_dir() or gui.suffix.lower() != '.app'
+                or not (gui / 'Contents/Info.plist').is_file()):
+            raise ValueError('Select the existing Codex application bundle')
+    elif not gui.is_file() or not os.access(gui, os.X_OK):
         raise ValueError('The Codex GUI launcher is not executable')
     command = [sys.executable, str(ROOT / 'scripts/preview.py'), 'open', str(document)]
     if state_dir is not None:
@@ -55,7 +59,11 @@ def open_document(pdf, launcher, state_dir=None, prepare_only=False):
     if not prepare_only:
         # Pass the existing client's public browser link directly to its GUI
         # launcher. No system browser, shell, private IPC or client patch.
-        process = subprocess.Popen([str(gui), deep_link], stdin=subprocess.DEVNULL,
+        # macOS delivers URL AppleEvents through LaunchServices; passing a URL
+        # as a bundle executable argument is not equivalent to opening that URL.
+        command = (['/usr/bin/open', '-a', str(gui), deep_link]
+                   if sys.platform == 'darwin' else [str(gui), deep_link])
+        process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                    close_fds=True, start_new_session=True)
         try:

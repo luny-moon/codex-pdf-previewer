@@ -43,6 +43,11 @@ class MenuOpenTests(unittest.TestCase):
         self.launcher.write_text('#!/bin/sh\nexit 0\n', encoding='utf-8')
         self.launcher.chmod(0o755)
         self.url = 'http://127.0.0.1:34791/'
+        # These eight tests cover the executable-argv contract on every CI OS.
+        # Darwin's application-bundle/URL-event contract is tested separately.
+        platform = patch.object(self.menu.sys, 'platform', 'linux')
+        platform.start()
+        self.addCleanup(platform.stop)
 
     def backend_result(self, *, url=None, pdf=None, returncode=0, stderr=''):
         return subprocess.CompletedProcess(
@@ -204,6 +209,82 @@ class MenuOpenTests(unittest.TestCase):
             access.assert_called_once_with(self.launcher.resolve(), self.menu.os.X_OK)
             run.assert_not_called()
             popen.assert_not_called()
+
+
+class DarwinMenuOpenTests(unittest.TestCase):
+    def setUp(self):
+        self.menu = load_menu()
+        self.temporary = tempfile.TemporaryDirectory(prefix='pdf-darwin-menu-test-')
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.document = self.base / 'selected 文档 $ file.pdf'
+        self.document.write_bytes(sample_pdf(1))
+        self.bundle = self.base / 'Codex with spaces $ value.app'
+        (self.bundle / 'Contents').mkdir(parents=True)
+        (self.bundle / 'Contents/Info.plist').write_text(
+            '<?xml version="1.0"?><plist version="1.0"><dict/></plist>', encoding='utf-8')
+        self.url = 'http://127.0.0.1:34791/'
+        self.backend = subprocess.CompletedProcess(
+            [], 0, stdout=json.dumps({'url': self.url, 'pdf': str(self.document.resolve())}), stderr='')
+        platform = patch.object(self.menu.sys, 'platform', 'darwin')
+        platform.start()
+        self.addCleanup(platform.stop)
+
+    def test_url_is_delivered_to_selected_app_with_launchservices(self):
+        process = MagicMock()
+        process.wait.return_value = 0
+        with patch.object(self.menu.subprocess, 'run', return_value=self.backend) as run, \
+                patch.object(self.menu.subprocess, 'Popen', return_value=process) as popen, \
+                patch.object(self.menu.os, 'access', side_effect=AssertionError('A bundle is not an executable file')):
+            result = self.menu.open_document(self.document, self.bundle)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0],
+                         [sys.executable, str(PREVIEW_SCRIPT), 'open', str(self.document.resolve())])
+        popen.assert_called_once()
+        argv = popen.call_args.args[0]
+        # -a chooses the Codex bundle; open(URL) without -a would select the
+        # protocol/default handler. The .app is never invoked as a binary, and
+        # no --args option turns the URL into an ordinary executable argument.
+        self.assertEqual(argv[:3], ['/usr/bin/open', '-a', str(self.bundle.resolve())])
+        self.assertEqual(len(argv), 4)
+        link = urlsplit(argv[3])
+        self.assertEqual((link.scheme, link.netloc, link.path), ('codex', 'browser', ''))
+        self.assertEqual(parse_qs(link.query), {'url': [self.url]})
+        self.assertNotIn(str(self.document), argv[3])
+        self.assertFalse(popen.call_args.kwargs.get('shell', False))
+        self.assertTrue(result['submitted_to_codex'])
+        self.assertEqual(result['url'], self.url)
+        process.kill.assert_not_called()
+        process.terminate.assert_not_called()
+
+    def test_invalid_bundle_shapes_are_rejected_before_backend_or_gui(self):
+        executable = self.base / 'plain executable'
+        executable.write_text('# fixture', encoding='utf-8')
+        executable.chmod(0o755)
+        file_with_app_suffix = self.base / 'not-a-bundle.app'
+        file_with_app_suffix.write_text('# fixture', encoding='utf-8')
+        missing_info = self.base / 'no-info.app'
+        missing_info.mkdir()
+        wrong_suffix = self.base / 'wrong.bundle'
+        (wrong_suffix / 'Contents').mkdir(parents=True)
+        (wrong_suffix / 'Contents/Info.plist').write_text('<plist/>', encoding='utf-8')
+        for launcher in (executable, file_with_app_suffix, missing_info, wrong_suffix):
+            with self.subTest(launcher=launcher.name), \
+                    patch.object(self.menu.subprocess, 'run') as run, \
+                    patch.object(self.menu.subprocess, 'Popen') as popen:
+                with self.assertRaises(ValueError):
+                    self.menu.open_document(self.document, launcher)
+                run.assert_not_called()
+                popen.assert_not_called()
+
+    def test_prepare_only_accepts_bundle_without_delivering_a_url_event(self):
+        with patch.object(self.menu.subprocess, 'run', return_value=self.backend) as run, \
+                patch.object(self.menu.subprocess, 'Popen') as popen:
+            result = self.menu.open_document(self.document, self.bundle, prepare_only=True)
+        run.assert_called_once()
+        popen.assert_not_called()
+        self.assertFalse(result['submitted_to_codex'])
+        self.assertEqual(result['url'], self.url)
 
 
 
