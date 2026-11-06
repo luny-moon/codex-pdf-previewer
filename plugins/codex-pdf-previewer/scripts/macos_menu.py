@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -14,6 +15,8 @@ BUNDLE_ID = 'org.codex-pdf-previewer.open-pdf'
 APP_NAME = 'Codex PDF Previewer.app'
 MANIFEST = 'codex-pdf-previewer-managed.json'
 MANAGED_KEY = 'CodexPDFPreviewerManaged'
+DISCOVERY_TIMEOUT = 3.0
+DISCOVERY_POLL_INTERVAL = 0.15
 
 
 class MenuSetupError(Exception):
@@ -292,8 +295,41 @@ def _query(probe):
 
 
 def _discovered(result, app):
-    return any(isinstance(item, dict) and item.get('bundleId') == BUNDLE_ID
-               and item.get('appPath') == str(app) for item in result['applications'])
+    try:
+        expected = app.resolve(strict=True)
+    except OSError:
+        return False
+    for item in result['applications']:
+        if not isinstance(item, dict) or item.get('bundleId') != BUNDLE_ID:
+            continue
+        value = item.get('appPath')
+        if not isinstance(value, str) or not _safe_path(value):
+            continue
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            continue
+        try:
+            if candidate.resolve(strict=True) == expected or candidate.samefile(expected):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _wait_for_discovery(probe, app, default_handler):
+    # LSRegisterURL can finish before other Launch Services readers observe its
+    # document claim. Keep both the real viewer-discovery and default guards.
+    deadline = time.monotonic() + DISCOVERY_TIMEOUT
+    while True:
+        result = _query(probe)
+        if result['default_handler'] != default_handler:
+            raise MenuSetupError('The default PDF application changed during registration.')
+        if _discovered(result, app):
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MenuSetupError('macOS did not discover the generated PDF application.')
+        time.sleep(min(DISCOVERY_POLL_INTERVAL, remaining))
 
 
 def _installed(app, gui, state, changed):
@@ -340,9 +376,7 @@ def _install_locked(package, setup, gui):
         if previous is not None and previous.get('fingerprint') == fingerprint:
             if not _discovered(before, app):
                 _services('register', app)
-            after = _query(probe)
-            if after['default_handler'] != before['default_handler'] or not _discovered(after, app):
-                return _skip('macOS could not confirm the existing optional PDF application without changing defaults.')
+            _wait_for_discovery(probe, app, before['default_handler'])
             return _installed(app, gui, state, False)
         source_file = staging / 'wrapper.js'
         source_file.write_text(source, encoding='utf-8')
@@ -390,11 +424,7 @@ def _install_locked(package, setup, gui):
             _write_record(sidecar, desired_sidecar)
             state.mkdir(parents=True, exist_ok=True, mode=0o700)
             _services('register', app)
-            after = _query(probe)
-            if after['default_handler'] != before['default_handler']:
-                raise MenuSetupError('The default PDF application changed during registration; the generated wrapper was rolled back.')
-            if not _discovered(after, app):
-                raise MenuSetupError('macOS did not discover the generated PDF application; the wrapper was rolled back.')
+            _wait_for_discovery(probe, app, before['default_handler'])
             return _installed(app, gui, state, True)
         except (OSError, ValueError, MenuSetupError, plistlib.InvalidFileException) as error:
             rollback_error = False

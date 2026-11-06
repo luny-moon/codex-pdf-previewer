@@ -58,6 +58,7 @@ class MacMenuTests(unittest.TestCase):
         self.default = 'com.apple.Preview'
         self.fail_next_registration = False
         self.hide_wrapper = False
+        self.delayed_queries_remaining = 0
 
     @contextlib.contextmanager
     def mocked_host(self):
@@ -77,7 +78,8 @@ class MacMenuTests(unittest.TestCase):
                 patch.object(Path, 'is_file', is_file), \
                 patch.object(self.menu.os, 'access', side_effect=access), \
                 patch.object(self.menu, '_run', side_effect=self.fake_run), \
-                patch.object(self.menu, '_services', side_effect=self.fake_services):
+                patch.object(self.menu, '_services', side_effect=self.fake_services), \
+                patch.object(self.menu, 'DISCOVERY_TIMEOUT', 0):
             yield
 
     def fake_run(self, argv, message):
@@ -108,8 +110,11 @@ class MacMenuTests(unittest.TestCase):
         applications = [{'appPath': '/System/Applications/Preview.app',
                          'bundleId': self.default, 'displayName': 'Preview'}]
         if self.app.exists() and not self.hide_wrapper:
-            applications.append({'appPath': str(self.app), 'bundleId': self.menu.BUNDLE_ID,
-                                 'displayName': '用高清 PDF 插件打开'})
+            if self.delayed_queries_remaining:
+                self.delayed_queries_remaining -= 1
+            else:
+                applications.append({'appPath': str(self.app), 'bundleId': self.menu.BUNDLE_ID,
+                                     'displayName': '用高清 PDF 插件打开'})
         return {'default_handler': self.default, 'applications': applications}
 
     def install(self):
@@ -199,11 +204,51 @@ class MacMenuTests(unittest.TestCase):
             self.assertTrue((backup / self.menu.APP_NAME).is_dir())
             self.assertTrue((backup / 'manifest.json').is_file())
 
+    def test_discovery_waits_briefly_but_requires_the_actual_registered_viewer(self):
+        self.delayed_queries_remaining = 1
+        with self.mocked_host(), patch.object(self.menu, 'DISCOVERY_TIMEOUT', 1), \
+                patch.object(self.menu.time, 'monotonic', side_effect=[0, 0.1]), \
+                patch.object(self.menu.time, 'sleep') as sleep:
+            result = self.install()
+        self.assertEqual(result['status'], 'installed', result)
+        self.assertTrue(result['viewer_discovered'])
+        sleep.assert_called_once_with(self.menu.DISCOVERY_POLL_INTERVAL)
+        self.assertEqual(sum(operation == 'query' for operation, _ in self.native), 3)
+
+    def test_discovery_requires_bundle_id_and_the_same_physical_path(self):
+        self.app.mkdir(parents=True)
+        alias = self.base / 'path-alias.app'
+        other = self.base / 'different.app'
+        other.mkdir()
+        original_resolve = Path.resolve
+        expected = original_resolve(self.app, strict=True)
+
+        def resolve(path, *args, **kwargs):
+            return expected if path == alias else original_resolve(path, *args, **kwargs)
+
+        result = {'applications': [{'appPath': str(alias), 'bundleId': self.menu.BUNDLE_ID}]}
+        with patch.object(Path, 'resolve', resolve):
+            self.assertTrue(self.menu._discovered(result, self.app))
+        result['applications'][0]['appPath'] = str(other)
+        self.assertFalse(self.menu._discovered(result, self.app))
+        result['applications'][0] = {'appPath': str(self.app), 'bundleId': 'unrelated.app'}
+        self.assertFalse(self.menu._discovered(result, self.app))
+
+    def test_default_change_stops_discovery_without_waiting(self):
+        with patch.object(self.menu, '_query', return_value={
+                'default_handler': 'another.default', 'applications': []}), \
+                patch.object(self.menu.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(self.menu.MenuSetupError, 'default PDF application changed'):
+                self.menu._wait_for_discovery(self.base / 'probe.pdf', self.app, 'com.apple.Preview')
+        sleep.assert_not_called()
+
     def test_registration_discovery_failure_removes_only_new_owned_wrapper(self):
         self.hide_wrapper = True
-        with self.mocked_host():
+        with self.mocked_host(), patch.object(self.menu.time, 'sleep') as sleep:
             result = self.install()
         self.assertEqual(result['status'], 'skipped')
+        sleep.assert_not_called()
+        self.assertEqual(sum(operation == 'query' for operation, _ in self.native), 2)
         self.assertFalse(result['rollback_failed'])
         self.assertFalse(self.app.exists())
         self.assertFalse((self.setup / 'installation.json').exists())
@@ -256,9 +301,23 @@ class NativeMacAppletTests(unittest.TestCase):
             # This test registers only a unique synthetic bundle, never the
             # production bundle id or the real codex:// default application.
             identifier = 'org.codex-pdf-previewer.integration.' + uuid.uuid4().hex
-            with patch.object(menu, 'BUNDLE_ID', identifier):
+            diagnostics = []
+            real_query = menu._query
+
+            def captured_query(probe):
+                response = real_query(probe)
+                diagnostics.append({'synthetic_probe': str(probe), 'result': response})
+                return response
+
+            expected_app = (base / 'profile/pdf-previewer-menu/macos' / menu.APP_NAME).resolve()
+            with patch.object(menu, 'BUNDLE_ID', identifier), \
+                    patch.object(menu, '_query', side_effect=captured_query):
                 result = menu.install_menu(package, base / 'profile', launcher=gui)
-                self.assertEqual(result['status'], 'installed', result)
+                if result['status'] != 'installed':
+                    self.fail(json.dumps({'installation': result,
+                                          'expected_synthetic_bundle_id': identifier,
+                                          'expected_synthetic_app': str(expected_app),
+                                          'native_queries': diagnostics}, ensure_ascii=False, indent=2))
                 self.assertTrue(result['viewer_discovered'])
                 self.assertFalse(result['ui_verified'])
                 app = Path(result['app_bundle'])
