@@ -13,7 +13,6 @@ Send the ZIP or this GitHub page to Codex and say:
 > Install this plugin for me.
 
 Requires Codex desktop and Python 3.10+. Restart Codex if the plugin is not yet visible.
-Repository access is required while this project is private.
 
 ## Open a PDF
 
