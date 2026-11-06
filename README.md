@@ -6,7 +6,7 @@ Sharper local PDF previews, inside Codex.
 
 ## Install
 
-[Download ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.5.0/codex-pdf-previewer-1.5.0.zip) · macOS / Windows / Linux
+[Download ZIP](https://github.com/luny-moon/codex-pdf-previewer/releases/download/v1.6.0/codex-pdf-previewer-1.6.0.zip) · macOS / Windows / Linux
 
 Send the ZIP or this GitHub page to Codex and say:
 
@@ -16,9 +16,9 @@ Requires Codex desktop and Python 3.10+. Restart Codex if the plugin is not yet 
 
 ## Open a PDF
 
-**Linux:** the installer adds **Open in → 用高清 PDF 插件打开** to the PDF menu on supported GIO desktops. Select it to open a new HD preview tab while keeping the original preview.
+**macOS (preview) / Linux:** the installer adds **Open in → 用高清 PDF 插件打开** to the PDF menu on supported desktop clients. Select it to open a new HD preview tab while keeping the original preview.
 
-**All systems:** attach a PDF and say **“Open this PDF.”** The menu shortcut currently supports Linux only.
+**All systems:** attach a PDF and say **“Open this PDF.”** Windows currently uses this chat opening flow; its Codex PDF menu has no supported plugin entry.
 
 ## Preview
 

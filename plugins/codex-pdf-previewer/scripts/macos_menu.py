@@ -12,11 +12,14 @@ import uuid
 from pathlib import Path
 
 BUNDLE_ID = 'org.codex-pdf-previewer.open-pdf'
-APP_NAME = 'Codex PDF Previewer.app'
+APP_NAME = '用高清 PDF 插件打开.app'
+COMPILE_OPTIONS = ('-s', '-l', 'JavaScript')
 MANIFEST = 'codex-pdf-previewer-managed.json'
 MANAGED_KEY = 'CodexPDFPreviewerManaged'
 DISCOVERY_TIMEOUT = 3.0
 DISCOVERY_POLL_INTERVAL = 0.15
+STOP_TIMEOUT = 3.0
+STOP_POLL_INTERVAL = 0.1
 
 
 class MenuSetupError(Exception):
@@ -127,6 +130,29 @@ else:
 '''
 
 
+
+# Match both identity and physical location before requesting a graceful quit.
+# There is deliberately no force-termination operation in production.
+OWNED_APP_HELPER = r"""
+ObjC.import('AppKit');
+function run(argv) {
+    var identifier = argv[0], expected = argv[1], action = argv[2];
+    var applications = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(identifier);
+    var result = [];
+    for (var i = 0; i < applications.count; i++) {
+        var application = applications.objectAtIndex(i);
+        var location = application.bundleURL;
+        if (!location) continue;
+        var actual = ObjC.unwrap(location.URLByResolvingSymlinksInPath.path);
+        if (actual !== expected || ObjC.unwrap(application.bundleIdentifier) !== identifier) continue;
+        if (action === 'terminate') application.terminate;
+        result.push(Number(application.processIdentifier));
+    }
+    return JSON.stringify(result);
+}
+"""
+
+
 def _skip(reason, **extra):
     return {'status': 'skipped', 'reason': reason, **extra}
 
@@ -224,7 +250,7 @@ def _source(package_root, gui, state):
 
 
 def _plist():
-    return {'CFBundleIdentifier': BUNDLE_ID, 'CFBundleName': 'Codex PDF Previewer',
+    return {'CFBundleIdentifier': BUNDLE_ID, 'CFBundleName': '用高清 PDF 插件打开',
             'CFBundleDisplayName': '用高清 PDF 插件打开', 'CFBundlePackageType': 'APPL',
             'LSUIElement': True, MANAGED_KEY: True,
             'CFBundleDocumentTypes': [{'CFBundleTypeName': 'PDF document',
@@ -332,6 +358,34 @@ def _wait_for_discovery(probe, app, default_handler):
         time.sleep(min(DISCOVERY_POLL_INTERVAL, remaining))
 
 
+
+def _running_processes(app, action):
+    if action not in ('inspect', 'terminate') or _manifest(app) is None:
+        raise MenuSetupError('Refused to manage an unknown macOS application.')
+    response = _run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', OWNED_APP_HELPER,
+                     BUNDLE_ID, app.resolve(strict=True), action],
+                    'macOS could not inspect the existing PDF application process.')
+    try:
+        result = json.loads(response.stdout)
+        if not isinstance(result, list) or not all(type(pid) is int and pid > 0 for pid in result):
+            raise ValueError('Invalid process result')
+        return result
+    except (ValueError, TypeError) as error:
+        raise MenuSetupError('macOS returned an invalid PDF application process result.') from error
+
+
+def _stop_owned_application(app):
+    if not _running_processes(app, 'inspect'):
+        return
+    _running_processes(app, 'terminate')
+    deadline = time.monotonic() + STOP_TIMEOUT
+    while _running_processes(app, 'inspect'):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MenuSetupError('The existing PDF application did not quit gracefully; left it unchanged.')
+        time.sleep(min(STOP_POLL_INTERVAL, remaining))
+
+
 def _user_applications_dir():
     return Path.home() / 'Applications'
 
@@ -369,7 +423,8 @@ def _install_locked(package, setup, gui, applications):
     if previous is None and installed is not None:
         return _skip('An earlier macOS menu record has no matching application; left it unchanged for recovery.')
     source = _source(package, gui, state)
-    fingerprint = hashlib.sha256((source + json.dumps(_plist(), sort_keys=True)).encode('utf-8')).hexdigest()
+    fingerprint = hashlib.sha256((source + json.dumps(_plist(), sort_keys=True)
+                                  + json.dumps(COMPILE_OPTIONS)).encode('utf-8')).hexdigest()
     with tempfile.TemporaryDirectory(prefix='.pdf-menu-', dir=setup) as temporary, \
             tempfile.TemporaryDirectory(prefix='.pdf-menu-', dir=applications) as application_temp:
         staging = Path(temporary)
@@ -388,7 +443,7 @@ def _install_locked(package, setup, gui, applications):
         source_file = staging / 'wrapper.js'
         source_file.write_text(source, encoding='utf-8')
         compiled = bundle_staging / APP_NAME
-        _run(['/usr/bin/osacompile', '-l', 'JavaScript', '-o', compiled, source_file],
+        _run(['/usr/bin/osacompile', *COMPILE_OPTIONS, '-o', compiled, source_file],
              'macOS could not compile the PDF application wrapper.')
         info_path = compiled / 'Contents/Info.plist'
         info = plistlib.loads(info_path.read_bytes())
@@ -430,6 +485,10 @@ def _install_locked(package, setup, gui, applications):
                         or _manifest(app) != previous
                         or _digest(app) != installed['content_sha256']):
                     raise MenuSetupError('The macOS PDF application changed while being backed up; left it unchanged.')
+                _stop_owned_application(app)
+                if (_manifest(app) != previous
+                        or _digest(app) != installed['content_sha256']):
+                    raise MenuSetupError('The macOS PDF application changed while stopping; left it unchanged.')
                 os.replace(app, retired)
                 old_moved = True
             os.replace(compiled, app)
@@ -479,7 +538,7 @@ def install_menu(package_root, codex_home, launcher=None):
         gui = _discover_gui(launcher)
         if gui is None:
             return _skip('A verified Codex or ChatGPT application bundle was not found; core plugin installation is unaffected.')
-        for tool in ('/usr/bin/osacompile', '/usr/bin/codesign'):
+        for tool in ('/usr/bin/osacompile', '/usr/bin/codesign', '/usr/bin/osascript'):
             if not Path(tool).is_file() or not os.access(tool, os.X_OK):
                 return _skip('A required macOS application tool is unavailable; core plugin installation is unaffected.')
         setup = Path(codex_home).expanduser().resolve() / 'pdf-previewer-menu/macos'

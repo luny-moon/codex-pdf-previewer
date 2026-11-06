@@ -65,7 +65,7 @@ class MacMenuTests(unittest.TestCase):
     def mocked_host(self):
         original_is_file = Path.is_file
         original_access = os.access
-        tools = {'/usr/bin/osacompile', '/usr/bin/codesign'}
+        tools = {'/usr/bin/osacompile', '/usr/bin/codesign', '/usr/bin/osascript'}
 
         def is_file(path):
             return True if path.as_posix() in tools else original_is_file(path)
@@ -81,7 +81,9 @@ class MacMenuTests(unittest.TestCase):
                 patch.object(self.menu, '_run', side_effect=self.fake_run), \
                 patch.object(self.menu, '_services', side_effect=self.fake_services), \
                 patch.object(self.menu, '_user_applications_dir', return_value=self.applications), \
-                patch.object(self.menu, 'DISCOVERY_TIMEOUT', 0):
+                patch.object(self.menu, 'DISCOVERY_TIMEOUT', 0), \
+                patch.object(self.menu, '_running_processes', return_value=[]) as running:
+            self.running_mock = running
             yield
 
     def fake_run(self, argv, message):
@@ -133,6 +135,8 @@ class MacMenuTests(unittest.TestCase):
             self.assertIn('five', result['visibility_note'])
             info = plistlib.loads((self.app / 'Contents/Info.plist').read_bytes())
             self.assertEqual(info['CFBundleIdentifier'], self.menu.BUNDLE_ID)
+            self.assertEqual(self.menu.APP_NAME, '用高清 PDF 插件打开.app')
+            self.assertEqual(info['CFBundleName'], '用高清 PDF 插件打开')
             self.assertEqual(info['CFBundleDisplayName'], '用高清 PDF 插件打开')
             document_type = info['CFBundleDocumentTypes'][0]
             self.assertEqual(document_type['CFBundleTypeRole'], 'Viewer')
@@ -151,7 +155,8 @@ class MacMenuTests(unittest.TestCase):
             self.assertFalse(again['changed'])
             self.assertEqual(len(self.commands), command_count)
             self.assertFalse((self.setup / '.install-lock').exists())
-        self.assertEqual(self.commands[0][:3], ['/usr/bin/osacompile', '-l', 'JavaScript'])
+        self.assertEqual(self.commands[0][:4], ['/usr/bin/osacompile', '-s', '-l', 'JavaScript'])
+        self.running_mock.assert_not_called()
         self.assertTrue(any('--verify' in command for command in self.commands))
 
     def test_cli_and_legacy_chatgpt_are_not_gui_bundles(self):
@@ -199,6 +204,69 @@ class MacMenuTests(unittest.TestCase):
             self.assertEqual(self.menu._digest(self.app), digest)
             self.assertEqual(len(self.commands), commands)
         self.assertFalse((self.base / 'other-profile/pdf-previewer-menu/macos/installation.json').exists())
+
+    def test_compile_mode_is_fingerprinted_and_old_mode_is_rebuilt(self):
+        with self.mocked_host():
+            with patch.object(self.menu, 'COMPILE_OPTIONS', ('-l', 'JavaScript')):
+                first = self.install()
+            self.assertEqual(first['status'], 'installed', first)
+            before = json.loads((self.setup / 'installation.json').read_text())
+            self.running_mock.assert_not_called()
+            upgraded = self.install()
+            self.assertEqual(upgraded['status'], 'installed', upgraded)
+            self.assertTrue(upgraded['changed'])
+            after = json.loads((self.setup / 'installation.json').read_text())
+            self.assertNotEqual(before['fingerprint'], after['fingerprint'])
+            self.running_mock.assert_called_once_with(self.app, 'inspect')
+        compiles = [command for command in self.commands if command[0] == '/usr/bin/osacompile']
+        self.assertNotIn('-s', compiles[0])
+        self.assertIn('-s', compiles[1])
+
+    def test_running_upgrade_requests_only_graceful_stop(self):
+        with self.mocked_host():
+            self.assertEqual(self.install()['status'], 'installed')
+            other = self.base / 'new durable package'
+            (other / 'scripts').mkdir(parents=True)
+            (other / 'scripts/menu_open.py').write_text('# synthetic update\n')
+            self.running_mock.side_effect = [[12345], [12345], []]
+            result = self.menu.install_menu(other, self.home, launcher=self.gui)
+            self.assertEqual(result['status'], 'installed', result)
+            self.assertTrue(result['changed'])
+            self.assertEqual([call.args[1] for call in self.running_mock.call_args_list],
+                             ['inspect', 'terminate', 'inspect'])
+            self.assertNotIn('forceTerminate', self.menu.OWNED_APP_HELPER)
+
+    def test_graceful_stop_timeout_preserves_bundle_and_installation_record(self):
+        with self.mocked_host():
+            self.assertEqual(self.install()['status'], 'installed')
+            digest = self.menu._digest(self.app)
+            record = (self.setup / 'installation.json').read_bytes()
+            other = self.base / 'another durable package'
+            (other / 'scripts').mkdir(parents=True)
+            (other / 'scripts/menu_open.py').write_text('# synthetic update\n')
+            self.running_mock.return_value = [12345]
+            with patch.object(self.menu, 'STOP_TIMEOUT', 0), \
+                    patch.object(self.menu.time, 'sleep') as sleep:
+                result = self.menu.install_menu(other, self.home, launcher=self.gui)
+            self.assertEqual(result['status'], 'skipped', result)
+            self.assertFalse(result['rollback_failed'])
+            self.assertIn('quit gracefully', result['reason'])
+            self.assertEqual(self.menu._digest(self.app), digest)
+            self.assertEqual((self.setup / 'installation.json').read_bytes(), record)
+            self.assertEqual([call.args[1] for call in self.running_mock.call_args_list],
+                             ['inspect', 'terminate', 'inspect'])
+            sleep.assert_not_called()
+
+    def test_unknown_application_never_reaches_process_management(self):
+        foreign = self.applications / 'unrelated.app'
+        foreign.mkdir(parents=True)
+        with patch.object(self.menu, '_run') as run:
+            with self.assertRaises(self.menu.MenuSetupError):
+                self.menu._running_processes(foreign, 'terminate')
+        run.assert_not_called()
+        self.assertIn('actual !== expected', self.menu.OWNED_APP_HELPER)
+        self.assertIn('application.bundleIdentifier', self.menu.OWNED_APP_HELPER)
+        self.assertNotIn('forceTerminate', self.menu.OWNED_APP_HELPER)
 
     def test_failed_update_restores_previous_owned_bundle_and_sidecar(self):
         with self.mocked_host():
@@ -295,14 +363,6 @@ class MacMenuTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'darwin', 'Real applet event delivery requires macOS')
 class NativeMacAppletTests(unittest.TestCase):
     def test_real_compile_registration_and_open_documents_argv(self):
-        self._exercise_native_events(stay_open=False)
-
-    @unittest.skipUnless(os.environ.get('GITHUB_ACTIONS') == 'true',
-                         'Temporary stay-open comparison runs only on GitHub Actions')
-    def test_stay_open_lifetime_comparison(self):
-        self._exercise_native_events(stay_open=True)
-
-    def _exercise_native_events(self, stay_open):
         if not all(Path(tool).is_file() for tool in ('/usr/bin/osacompile', '/usr/bin/codesign', '/usr/bin/open')):
             self.skipTest('Standard macOS applet tools are unavailable')
         menu = load_module()
@@ -339,17 +399,9 @@ class NativeMacAppletTests(unittest.TestCase):
                     diagnostics.append({'synthetic_probe': str(probe), 'result': response})
                     return response
 
-                original_run = menu._run
-
-                def comparison_run(argv, message):
-                    if stay_open and str(argv[0]) == '/usr/bin/osacompile':
-                        argv = [argv[0], '-s', *argv[1:]]
-                    return original_run(argv, message)
-
                 with patch.object(menu, 'BUNDLE_ID', identifier), \
                         patch.object(menu, 'APP_NAME', app_name), \
-                        patch.object(menu, '_query', side_effect=captured_query), \
-                        patch.object(menu, '_run', side_effect=comparison_run):
+                        patch.object(menu, '_query', side_effect=captured_query):
                     result = menu.install_menu(package, base / 'profile', launcher=gui)
                     if result['status'] != 'installed':
                         self.fail(json.dumps({'installation': result,
@@ -377,12 +429,34 @@ class NativeMacAppletTests(unittest.TestCase):
                                    capture_output=True, text=True, timeout=20)
                     repeated = self._wait_for_records(record, 4, 'repeat the original document')
                     self.assertEqual(repeated[3:], [expected_prefix + [str(document)]])
+                    self.assertTrue(self._owned_applet_processes(identifier, app, 'inspect'),
+                                    'Production wrapper should stay open between document events')
+                    new_package = base / 'replacement durable plugin 文档'
+                    (new_package / 'scripts').mkdir(parents=True)
+                    new_record = base / 'new-source-received.jsonl'
+                    new_recorder = ('import json,sys\nfrom pathlib import Path\n'
+                                    'with Path(' + repr(str(new_record)) + ').open("a",encoding="utf-8") as stream:\n'
+                                    '    stream.write(json.dumps(sys.argv[1:],ensure_ascii=False)+"\\n")\n')
+                    (new_package / 'scripts/menu_open.py').write_text(new_recorder, encoding='utf-8')
+                    upgraded = menu.install_menu(new_package, base / 'profile', launcher=gui)
+                    self.assertEqual(upgraded['status'], 'installed', upgraded)
+                    self.assertTrue(upgraded['changed'])
+                    self.assertFalse(self._owned_applet_processes(identifier, app, 'inspect'),
+                                     'The old fixed-argv applet must stop before replacement')
+                    fresh = base / 'fresh after upgrade.pdf'
+                    fresh.write_bytes(sample_pdf(4))
+                    subprocess.run(['/usr/bin/open', '-a', str(app), str(fresh)], check=True,
+                                   capture_output=True, text=True, timeout=20)
+                    new_rows = self._wait_for_records(new_record, 1, 'new durable source after running upgrade')
+                    self.assertEqual(new_rows, [expected_prefix + [str(fresh)]])
+                    old_rows = [json.loads(line) for line in record.read_text(encoding='utf-8').splitlines()]
+                    self.assertEqual(old_rows, repeated)
                     probe = base / 'probe.pdf'
                     probe.write_bytes(sample_pdf())
                     after = menu._query(probe)
                     self.assertTrue(menu._discovered(after, app))
         finally:
-            # A stay-open comparison must not leave an applet process behind.
+            # The synthetic production applet must not leave a process behind.
             # The public query/terminate helper requires BOTH our random bundle
             # id and exact canonical app path before touching any process.
             self._stop_owned_applet(identifier, expected_app)
