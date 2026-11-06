@@ -18,6 +18,7 @@ menu = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(menu)
 
 
+@unittest.skipUnless(os.name == 'posix', 'requires fcntl and POSIX file permissions')
 class LinuxMenuTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='pdf-menu-test-')
@@ -171,9 +172,7 @@ class LinuxMenuTests(unittest.TestCase):
         self.assertFalse(self.desktop.exists())
         self.assertEqual(self.mimeapps.read_bytes(), self.original)
 
-    def test_optional_prerequisites_and_non_linux_skip(self):
-        with patch.object(menu.sys, 'platform', 'darwin'):
-            self.assertEqual(menu.install_menu(self.package, self.profile)['status'], 'skipped')
+    def test_optional_prerequisites_skip(self):
         with patch.object(menu.shutil, 'which', return_value=None):
             self.assertEqual(menu.install_menu(self.package, self.profile)['status'], 'skipped')
         with patch.object(menu.shutil, 'which', return_value='/usr/bin/gio'), \
@@ -207,6 +206,31 @@ class LinuxMenuTests(unittest.TestCase):
         self.assertEqual(result['status'], 'skipped')
         self.assertTrue(self.mimeapps.is_symlink())
         self.assertEqual(target.read_bytes(), self.original)
+
+
+class PlatformBoundaryTests(unittest.TestCase):
+    def test_non_linux_skips_without_importing_fcntl_or_writing_settings(self):
+        original_import = __import__
+
+        def guarded_import(name, *args, **kwargs):
+            if name == 'fcntl':
+                raise AssertionError('Non-Linux installation must not import fcntl')
+            return original_import(name, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory(prefix='pdf-non-linux-') as temporary:
+            base = Path(temporary)
+            profile = base / 'profile-must-not-be-created'
+            for platform in ('win32', 'darwin'):
+                with self.subTest(platform=platform), \
+                        patch.object(menu.sys, 'platform', platform), \
+                        patch('builtins.__import__', side_effect=guarded_import), \
+                        patch.object(menu.shutil, 'which', side_effect=AssertionError('No desktop discovery')), \
+                        patch.object(menu, '_install_locked', side_effect=AssertionError('No settings writes')):
+                    result = menu.install_menu(base / 'package', profile)
+                self.assertEqual(result['status'], 'skipped')
+                self.assertIn('Linux only', result['reason'])
+                self.assertFalse(profile.exists())
+                self.assertEqual(list(base.iterdir()), [])
 
 
 @unittest.skipUnless(sys.platform == 'linux' and shutil.which('gio'), 'requires Linux GIO')
