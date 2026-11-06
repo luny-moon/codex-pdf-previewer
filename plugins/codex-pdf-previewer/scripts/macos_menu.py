@@ -332,6 +332,10 @@ def _wait_for_discovery(probe, app, default_handler):
         time.sleep(min(DISCOVERY_POLL_INTERVAL, remaining))
 
 
+def _user_applications_dir():
+    return Path.home() / 'Applications'
+
+
 def _installed(app, gui, state, changed):
     return {'status': 'installed', 'app_bundle': str(app), 'bundle_id': BUNDLE_ID,
             'launcher': str(gui), 'state_dir': str(state), 'changed': changed,
@@ -340,8 +344,8 @@ def _installed(app, gui, state, changed):
             'visibility_note': 'Codex displays at most five PDF applications; the native menu order can limit visibility.'}
 
 
-def _install_locked(package, setup, gui):
-    app = setup / APP_NAME
+def _install_locked(package, setup, gui, applications):
+    app = applications / APP_NAME
     state = setup / 'state'
     previous = _manifest(app) if app.exists() or app.is_symlink() else None
     if (app.exists() or app.is_symlink()) and previous is None:
@@ -366,8 +370,11 @@ def _install_locked(package, setup, gui):
         return _skip('An earlier macOS menu record has no matching application; left it unchanged for recovery.')
     source = _source(package, gui, state)
     fingerprint = hashlib.sha256((source + json.dumps(_plist(), sort_keys=True)).encode('utf-8')).hexdigest()
-    with tempfile.TemporaryDirectory(prefix='.pdf-menu-', dir=setup) as temporary:
+    with tempfile.TemporaryDirectory(prefix='.pdf-menu-', dir=setup) as temporary, \
+            tempfile.TemporaryDirectory(prefix='.pdf-menu-', dir=applications) as application_temp:
         staging = Path(temporary)
+        bundle_staging = Path(application_temp)
+        retired = bundle_staging / 'previous.app'
         probe = staging / 'registration-probe.pdf'
         probe.write_bytes(b'%PDF-1.4\n% Synthetic registration probe.\n%%EOF\n')
         before = _query(probe)
@@ -380,7 +387,7 @@ def _install_locked(package, setup, gui):
             return _installed(app, gui, state, False)
         source_file = staging / 'wrapper.js'
         source_file.write_text(source, encoding='utf-8')
-        compiled = staging / APP_NAME
+        compiled = bundle_staging / APP_NAME
         _run(['/usr/bin/osacompile', '-l', 'JavaScript', '-o', compiled, source_file],
              'macOS could not compile the PDF application wrapper.')
         info_path = compiled / 'Contents/Info.plist'
@@ -403,6 +410,7 @@ def _install_locked(package, setup, gui):
         desired_sidecar = (json.dumps({**record, 'content_sha256': content_digest},
                                       sort_keys=True) + '\n').encode('utf-8')
         backup = None
+        old_moved = False
         published = False
         try:
             if _read_record(sidecar) != old_sidecar:
@@ -417,7 +425,13 @@ def _install_locked(package, setup, gui):
                 backup.mkdir(parents=True, mode=0o700)
                 (backup / 'manifest.json').write_text(json.dumps({'default_handler': before['default_handler'],
                                                                 'app_bundle': str(app)}), encoding='utf-8')
-                os.replace(app, backup / APP_NAME)
+                shutil.copytree(app, backup / APP_NAME, symlinks=True)
+                if (_digest(backup / APP_NAME) != installed['content_sha256']
+                        or _manifest(app) != previous
+                        or _digest(app) != installed['content_sha256']):
+                    raise MenuSetupError('The macOS PDF application changed while being backed up; left it unchanged.')
+                os.replace(app, retired)
+                old_moved = True
             os.replace(compiled, app)
             published = True
             # An external sidecar avoids modifying resources after codesigning.
@@ -434,8 +448,10 @@ def _install_locked(package, setup, gui):
                     if current is None or _digest(app) != content_digest:
                         raise MenuSetupError('The generated wrapper changed outside this installer.')
                     shutil.rmtree(app)
-                if backup is not None:
-                    shutil.copytree(backup / APP_NAME, app, symlinks=True)
+                if old_moved:
+                    if app.exists() or app.is_symlink():
+                        raise MenuSetupError('Another application appeared during rollback; left it unchanged.')
+                    os.replace(retired, app)
                     _services('register', app)
                 current_sidecar = _read_record(sidecar)
                 if current_sidecar != old_sidecar:
@@ -469,6 +485,11 @@ def install_menu(package_root, codex_home, launcher=None):
         setup = Path(codex_home).expanduser().resolve() / 'pdf-previewer-menu/macos'
         if setup.is_symlink() or setup.parent.is_symlink():
             return _skip('The macOS PDF menu setup location is a symbolic link; left it unchanged.')
+        applications = _user_applications_dir().expanduser()
+        if not applications.is_absolute() or applications.is_symlink():
+            return _skip('The user Applications location is unsupported; left it unchanged.')
+        applications.mkdir(parents=True, exist_ok=True)
+        applications = applications.resolve(strict=True)
         setup.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock = setup / '.install-lock'
         try:
@@ -476,7 +497,7 @@ def install_menu(package_root, codex_home, launcher=None):
         except FileExistsError:
             return _skip('Another macOS PDF menu installation is in progress; retry later.')
         try:
-            return _install_locked(package, setup, gui)
+            return _install_locked(package, setup, gui, applications)
         finally:
             lock.rmdir()
     except (OSError, ValueError, MenuSetupError, plistlib.InvalidFileException):

@@ -51,7 +51,8 @@ class MacMenuTests(unittest.TestCase):
         (self.package / 'scripts/menu_open.py').write_text('# synthetic menu launcher\n', encoding='utf-8')
         self.home = self.base / 'profile'
         self.setup = self.home / 'pdf-previewer-menu/macos'
-        self.app = self.setup / self.menu.APP_NAME
+        self.applications = self.base / 'isolated Applications'
+        self.app = self.applications / self.menu.APP_NAME
         self.gui = fake_gui(self.base)
         self.commands = []
         self.native = []
@@ -79,6 +80,7 @@ class MacMenuTests(unittest.TestCase):
                 patch.object(self.menu.os, 'access', side_effect=access), \
                 patch.object(self.menu, '_run', side_effect=self.fake_run), \
                 patch.object(self.menu, '_services', side_effect=self.fake_services), \
+                patch.object(self.menu, '_user_applications_dir', return_value=self.applications), \
                 patch.object(self.menu, 'DISCOVERY_TIMEOUT', 0):
             yield
 
@@ -186,6 +188,18 @@ class MacMenuTests(unittest.TestCase):
             self.assertEqual(compiled.read_text(), 'independent user change')
             self.assertEqual(len(self.commands), count)
 
+    def test_other_profile_cannot_replace_an_existing_managed_application(self):
+        with self.mocked_host():
+            first = self.install()
+            self.assertEqual(first['status'], 'installed', first)
+            digest = self.menu._digest(self.app)
+            commands = len(self.commands)
+            result = self.menu.install_menu(self.package, self.base / 'other-profile', launcher=self.gui)
+            self.assertEqual(result['status'], 'skipped')
+            self.assertEqual(self.menu._digest(self.app), digest)
+            self.assertEqual(len(self.commands), commands)
+        self.assertFalse((self.base / 'other-profile/pdf-previewer-menu/macos/installation.json').exists())
+
     def test_failed_update_restores_previous_owned_bundle_and_sidecar(self):
         with self.mocked_host():
             self.assertEqual(self.install()['status'], 'installed')
@@ -280,236 +294,79 @@ class MacMenuTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'darwin', 'Real applet event delivery requires macOS')
 class NativeMacAppletTests(unittest.TestCase):
-    @unittest.skipUnless(os.environ.get('GITHUB_ACTIONS') == 'true',
-                         'Temporary native registration matrix runs only on GitHub Actions')
-    def test_native_registration_diagnostic_matrix(self):
-        """Keep production behavior unchanged while measuring native claims."""
-        if not all(Path(tool).is_file() for tool in ('/usr/bin/osacompile', '/usr/bin/codesign')):
-            self.skipTest('Standard macOS applet tools are unavailable')
-        menu = load_module()
-        token = uuid.uuid4().hex
-        user_apps = Path.home() / 'Applications'
-        made_user_apps = not user_apps.exists()
-        created_apps = []
-        results = []
-        before = None
-        try:
-            user_apps.mkdir(exist_ok=True)
-            with tempfile.TemporaryDirectory(prefix='mac-pdf-matrix-') as temporary:
-                base = Path(temporary).resolve()
-                gui = fake_gui(base)
-                package = base / 'synthetic package'
-                (package / 'scripts').mkdir(parents=True)
-                # The matrix never opens an app. Its fixed target is harmless
-                # even if an OS background mechanism unexpectedly starts it.
-                (package / 'scripts/menu_open.py').write_text('raise SystemExit(0)\n', encoding='utf-8')
-                valid_probe = base / 'valid-probe.pdf'
-                valid_probe.write_bytes(sample_pdf())
-                minimal_probe = base / 'minimal-probe.pdf'
-                minimal_probe.write_bytes(b'%PDF-1.4\n% Synthetic registration probe.\n%%EOF\n')
-                before = menu._query(valid_probe)
-                self.assertTrue(before['default_handler'], before)
-                cases = [(location, agent, extensions, rank)
-                         for location in ('temporary', 'user-applications')
-                         for agent in (True, False) for extensions in (False, True)
-                         for rank in ('Alternate', 'Default')]
-                for index, (location, agent, extensions, rank) in enumerate(cases):
-                    identifier = 'org.codex-pdf-previewer.matrix.' + token + '.case' + str(index)
-                    name = 'Codex PDF Native CI ' + token + '-' + str(index) + '.app'
-                    destination = (base if location == 'temporary' else user_apps) / name
-                    self.assertFalse(destination.exists())
-                    staging = base / ('stage-' + str(index))
-                    staging.mkdir()
-                    source = staging / 'wrapper.js'
-                    source.write_text(menu._source(package, gui, base / 'unused-state'), encoding='utf-8')
-                    compiled = staging / name
-                    menu._run(['/usr/bin/osacompile', '-l', 'JavaScript', '-o', compiled, source],
-                              'Could not compile a synthetic diagnostic applet')
-                    with patch.object(menu, 'BUNDLE_ID', identifier):
-                        info_file = compiled / 'Contents/Info.plist'
-                        info = plistlib.loads(info_file.read_bytes())
-                        info.update(menu._plist())
-                        info['CFBundleName'] = name[:-4]
-                        info['CFBundleDisplayName'] = name[:-4]
-                        if not agent:
-                            info.pop('LSUIElement', None)
-                        claim = info['CFBundleDocumentTypes'][0]
-                        claim['LSHandlerRank'] = rank
-                        if extensions:
-                            claim['CFBundleTypeExtensions'] = ['pdf']
-                            claim['CFBundleTypeMIMETypes'] = ['application/pdf']
-                        info_file.write_bytes(plistlib.dumps(info))
-                        menu._run(['/usr/bin/codesign', '--force', '--sign', '-', compiled],
-                                  'Could not sign a synthetic diagnostic applet')
-                        menu._run(['/usr/bin/codesign', '--verify', '--strict', compiled],
-                                  'Could not verify a synthetic diagnostic applet')
-                        os.replace(compiled, destination)
-                        created_apps.append(destination)
-                        registration = menu._services('register', destination)
-                        discovered = False
-                        wait_error = None
-                        try:
-                            menu._wait_for_discovery(valid_probe, destination, before['default_handler'])
-                            discovered = True
-                        except menu.MenuSetupError as error:
-                            wait_error = str(error)
-                        valid_query = menu._query(valid_probe)
-                        minimal_query = menu._query(minimal_probe)
-                        details = self._native_registration_details(menu, identifier, valid_probe)
-                        result = {'case': index, 'location': location, 'ui_element': agent,
-                                  'explicit_pdf_extension_and_mime': extensions,
-                                  'handler_rank': rank,
-                                  'synthetic_bundle_id': identifier, 'synthetic_app': str(destination),
-                                  'registration': registration, 'discovered_with_valid_pdf': discovered,
-                                  'discovered_with_minimal_probe': menu._discovered(minimal_query, destination),
-                                  'wait_error': wait_error, 'native_registration': details,
-                                  'valid_probe_query': valid_query,
-                                  'minimal_probe_query': minimal_query}
-                        results.append(result)
-                        # Keep only one synthetic candidate on disk at a time.
-                        # This also immediately backs out a rank experiment if
-                        # macOS unexpectedly changes its chosen PDF default.
-                        shutil.rmtree(destination)
-                        after_cleanup = menu._query(valid_probe)
-                        result['default_after_own_app_removal'] = after_cleanup['default_handler']
-                        self.assertEqual(valid_query['default_handler'], before['default_handler'], result)
-                        self.assertEqual(minimal_query['default_handler'], before['default_handler'], result)
-                        self.assertEqual(after_cleanup['default_handler'], before['default_handler'], result)
-        finally:
-            # This is controlled runner diagnostics, never a product document or
-            # a claim that registration alone verifies the Codex menu.
-            print('MACOS_PDF_NATIVE_DIAGNOSTIC_MATRIX=' + json.dumps(
-                {'baseline_default': None if before is None else before['default_handler'],
-                 'cases': results}, ensure_ascii=False, sort_keys=True), flush=True)
-            for app in reversed(created_apps):
-                if app.is_dir() and app.name.startswith('Codex PDF Native CI ' + token + '-'):
-                    shutil.rmtree(app)
-            if made_user_apps:
-                try:
-                    user_apps.rmdir()
-                except OSError:
-                    pass
-
-    def _native_registration_details(self, menu, identifier, probe):
-        # Reuse only the ctypes definitions, then inspect this synthetic id's
-        # registration and the UTI of this generated probe through public APIs.
-        definitions = menu.LS_HELPER.split('operation, path = sys.argv[1:3]', 1)[0]
-        script = definitions + r"""
-identifier, probe = sys.argv[1:3]
-ls.LSCopyApplicationURLsForBundleIdentifier.argtypes = [ptr, c.POINTER(c.c_int32)]
-ls.LSCopyApplicationURLsForBundleIdentifier.restype = ptr
-ls.LSCopyAllRoleHandlersForContentType.argtypes = [ptr, c.c_uint32]
-ls.LSCopyAllRoleHandlersForContentType.restype = ptr
-bundle = cf.CFStringCreateWithCString(None, identifier.encode('utf-8'), UTF8)
-error = c.c_int32(0)
-applications = ls.LSCopyApplicationURLsForBundleIdentifier(bundle, c.byref(error))
-paths = []
-if applications:
-    try:
-        for index in range(cf.CFArrayGetCount(applications)):
-            item = cf.CFURLCopyFileSystemPath(cf.CFArrayGetValueAtIndex(applications, index), 0)
-            try:
-                paths.append(text(item))
-            finally:
-                if item:
-                    cf.CFRelease(item)
-    finally:
-        cf.CFRelease(applications)
-cf.CFRelease(bundle)
-uti = cf.CFStringCreateWithCString(None, b'com.adobe.pdf', UTF8)
-handlers = ls.LSCopyAllRoleHandlersForContentType(uti, ALL_ROLES)
-handler_ids = []
-if handlers:
-    try:
-        handler_ids = [text(cf.CFArrayGetValueAtIndex(handlers, i))
-                       for i in range(cf.CFArrayGetCount(handlers))]
-    finally:
-        cf.CFRelease(handlers)
-cf.CFRelease(uti)
-probe_uti = None
-uti_error = None
-try:
-    cf.CFURLCopyResourcePropertyForKey.argtypes = [ptr, ptr, c.POINTER(ptr), c.POINTER(ptr)]
-    cf.CFURLCopyResourcePropertyForKey.restype = c.c_bool
-    key = c.c_void_p.in_dll(cf, 'kCFURLTypeIdentifierKey').value
-    probe_url = url(probe)
-    value, native_error = ptr(), ptr()
-    try:
-        if cf.CFURLCopyResourcePropertyForKey(probe_url, key, c.byref(value), c.byref(native_error)):
-            probe_uti = text(value)
-    finally:
-        if value:
-            cf.CFRelease(value)
-        if native_error:
-            cf.CFRelease(native_error)
-        cf.CFRelease(probe_url)
-except (AttributeError, OSError, ValueError) as exception:
-    uti_error = type(exception).__name__
-print(json.dumps({'registered_bundle_paths': paths, 'bundle_lookup_status': error.value,
-                  'declares_pdf_handler': identifier in handler_ids,
-                  'pdf_handler_count': len(handler_ids), 'probe_uti': probe_uti,
-                  'probe_uti_error': uti_error}, ensure_ascii=False))
-"""
-        response = subprocess.run([sys.executable, '-c', script, identifier, str(probe)],
-                                  check=True, capture_output=True, text=True,
-                                  encoding='utf-8', timeout=15)
-        return json.loads(response.stdout)
-
     def test_real_compile_registration_and_open_documents_argv(self):
         if not all(Path(tool).is_file() for tool in ('/usr/bin/osacompile', '/usr/bin/codesign', '/usr/bin/open')):
             self.skipTest('Standard macOS applet tools are unavailable')
         menu = load_module()
-        with tempfile.TemporaryDirectory(prefix='mac-pdf-event-') as temporary:
-            base = Path(temporary).resolve()
-            gui = fake_gui(base)
-            package = base / 'synthetic plugin 文档 with spaces'
-            (package / 'scripts').mkdir(parents=True)
-            record = base / 'received.jsonl'
-            recorder = ('import json,sys\nfrom pathlib import Path\n'
-                        'with Path(' + repr(str(record)) + ').open("a",encoding="utf-8") as stream:\n'
-                        '    stream.write(json.dumps(sys.argv[1:],ensure_ascii=False)+"\\n")\n')
-            (package / 'scripts/menu_open.py').write_text(recorder, encoding='utf-8')
-            document = base / '中文 space ; $(not-a-command) "quote".pdf'
-            document.write_bytes(sample_pdf())
-            second = base / 'second.pdf'
-            second.write_bytes(sample_pdf(2))
-            # This test registers only a unique synthetic bundle, never the
-            # production bundle id or the real codex:// default application.
-            identifier = 'org.codex-pdf-previewer.integration.' + uuid.uuid4().hex
-            diagnostics = []
-            real_query = menu._query
+        identifier = 'org.codex-pdf-previewer.integration.' + uuid.uuid4().hex
+        app_name = 'Codex PDF Previewer CI ' + uuid.uuid4().hex + '.app'
+        applications = menu._user_applications_dir()
+        made_applications = not applications.exists()
+        expected_app = (applications / app_name).resolve()
+        self.assertFalse(expected_app.exists())
+        try:
+            with tempfile.TemporaryDirectory(prefix='mac-pdf-event-') as temporary:
+                base = Path(temporary).resolve()
+                gui = fake_gui(base)
+                package = base / 'synthetic plugin 文档 with spaces'
+                (package / 'scripts').mkdir(parents=True)
+                record = base / 'received.jsonl'
+                recorder = ('import json,sys\nfrom pathlib import Path\n'
+                            'with Path(' + repr(str(record)) + ').open("a",encoding="utf-8") as stream:\n'
+                            '    stream.write(json.dumps(sys.argv[1:],ensure_ascii=False)+"\\n")\n')
+                (package / 'scripts/menu_open.py').write_text(recorder, encoding='utf-8')
+                document = base / '中文 space ; $(not-a-command) "quote".pdf'
+                document.write_bytes(sample_pdf())
+                second = base / 'second.pdf'
+                second.write_bytes(sample_pdf(2))
+                # Standard user Applications location, but unique synthetic id
+                # and name. The real Codex app and its URL default are untouched.
+                diagnostics = []
+                real_query = menu._query
 
-            def captured_query(probe):
-                response = real_query(probe)
-                diagnostics.append({'synthetic_probe': str(probe), 'result': response})
-                return response
+                def captured_query(probe):
+                    response = real_query(probe)
+                    diagnostics.append({'synthetic_probe': str(probe), 'result': response})
+                    return response
 
-            expected_app = (base / 'profile/pdf-previewer-menu/macos' / menu.APP_NAME).resolve()
-            with patch.object(menu, 'BUNDLE_ID', identifier), \
-                    patch.object(menu, '_query', side_effect=captured_query):
-                result = menu.install_menu(package, base / 'profile', launcher=gui)
-                if result['status'] != 'installed':
-                    self.fail(json.dumps({'installation': result,
-                                          'expected_synthetic_bundle_id': identifier,
-                                          'expected_synthetic_app': str(expected_app),
-                                          'native_queries': diagnostics}, ensure_ascii=False, indent=2))
-                self.assertTrue(result['viewer_discovered'])
-                self.assertFalse(result['ui_verified'])
-                app = Path(result['app_bundle'])
-                subprocess.run(['/usr/bin/open', '-a', str(app), str(document)], check=True,
-                               capture_output=True, text=True, timeout=20)
-                self._wait_for_records(record, 1)
-                subprocess.run(['/usr/bin/open', '-a', str(app), str(second), str(document)],
-                               check=True, capture_output=True, text=True, timeout=20)
-                rows = self._wait_for_records(record, 3)
-                expected_prefix = ['--launcher', str(gui.resolve()), '--state-dir', result['state_dir']]
-                self.assertEqual(rows[0], expected_prefix + [str(document)])
-                self.assertCountEqual(rows[1:], [expected_prefix + [str(second)],
-                                                expected_prefix + [str(document)]])
-                probe = base / 'probe.pdf'
-                probe.write_bytes(sample_pdf())
-                after = menu._query(probe)
-                self.assertTrue(menu._discovered(after, app))
+                with patch.object(menu, 'BUNDLE_ID', identifier), \
+                        patch.object(menu, 'APP_NAME', app_name), \
+                        patch.object(menu, '_query', side_effect=captured_query):
+                    result = menu.install_menu(package, base / 'profile', launcher=gui)
+                    if result['status'] != 'installed':
+                        self.fail(json.dumps({'installation': result,
+                                              'expected_synthetic_bundle_id': identifier,
+                                              'expected_synthetic_app': str(expected_app),
+                                              'native_queries': diagnostics}, ensure_ascii=False, indent=2))
+                    self.assertTrue(result['viewer_discovered'])
+                    self.assertFalse(result['ui_verified'])
+                    self.assertEqual(Path(result['app_bundle']).resolve(), expected_app)
+                    app = Path(result['app_bundle'])
+                    subprocess.run(['/usr/bin/open', '-a', str(app), str(document)], check=True,
+                                   capture_output=True, text=True, timeout=20)
+                    self._wait_for_records(record, 1)
+                    subprocess.run(['/usr/bin/open', '-a', str(app), str(second), str(document)],
+                                   check=True, capture_output=True, text=True, timeout=20)
+                    rows = self._wait_for_records(record, 3)
+                    expected_prefix = ['--launcher', str(gui.resolve()), '--state-dir', result['state_dir']]
+                    self.assertEqual(rows[0], expected_prefix + [str(document)])
+                    self.assertCountEqual(rows[1:], [expected_prefix + [str(second)],
+                                                    expected_prefix + [str(document)]])
+                    probe = base / 'probe.pdf'
+                    probe.write_bytes(sample_pdf())
+                    after = menu._query(probe)
+                    self.assertTrue(menu._discovered(after, app))
+        finally:
+            if expected_app.is_dir() and not expected_app.is_symlink():
+                info_path = expected_app / 'Contents/Info.plist'
+                info = plistlib.loads(info_path.read_bytes())
+                if info.get('CFBundleIdentifier') == identifier:
+                    shutil.rmtree(expected_app)
+            if made_applications:
+                try:
+                    applications.rmdir()
+                except OSError:
+                    pass
 
     def _wait_for_records(self, record, count):
         deadline = time.monotonic() + 20
