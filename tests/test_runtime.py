@@ -141,7 +141,7 @@ class InstallerTests(unittest.TestCase):
             config.write_text('[plugins."unrelated@personal"]\nenabled = true\n', encoding='utf-8')
             original = config.read_bytes()
             success = subprocess.CompletedProcess([], 0, stdout='{"installationId":"private-record"}', stderr='')
-            with patch.object(installer, 'ROOT', extracted), patch.object(installer.subprocess, 'run', return_value=success) as run:
+            with patch.object(installer, 'ROOT', extracted), patch.object(installer, 'configure_menu', return_value={'status': 'installed'}) as menu, patch.object(installer.subprocess, 'run', return_value=success) as run:
                 result = installer.install(home, 'codex executable')
             self.assertTrue(result['installed'])
             self.assertNotIn('installationId', result)
@@ -150,6 +150,8 @@ class InstallerTests(unittest.TestCase):
             marketplace = home.resolve() / 'plugin-sources/codex-pdf-previewer'
             catalog = json.loads((marketplace / '.agents/plugins/marketplace.json').read_text())
             source = (marketplace / catalog['plugins'][0]['source']['path']).parent
+            menu.assert_called_once_with(source / 'plugin', home.resolve(), None)
+            self.assertEqual(result['pdf_menu']['status'], 'installed')
             self.assertEqual(run.call_args_list[0].args[0], ['codex executable', 'plugin', 'marketplace', 'add', str(marketplace), '--json'])
             self.assertEqual(run.call_args_list[1].args[0], ['codex executable', 'plugin', 'add', 'codex-pdf-previewer@codex-pdf-previewer-local', '--json'])
             self.assertEqual(run.call_args_list[0].kwargs['env']['CODEX_HOME'], str(home.resolve()))
@@ -172,6 +174,19 @@ class InstallerTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'marketplace registration failed'):
                     installer.install(Path(temporary) / 'profile', 'codex executable')
 
+    def test_menu_failure_or_opt_out_preserves_core_install(self):
+        installer = module_at('installer_menu', PLUGIN / 'install.py')
+        success = subprocess.CompletedProcess([], 0, stdout='{}', stderr='')
+        with tempfile.TemporaryDirectory(prefix='pdf-menu-install-') as temporary:
+            with patch.object(installer.subprocess, 'run', return_value=success), patch.object(installer, 'configure_menu', side_effect=RuntimeError('Desktop unavailable')) as menu:
+                result = installer.install(Path(temporary) / 'profile', 'codex executable')
+                self.assertTrue(result['installed'])
+                self.assertEqual(result['pdf_menu']['status'], 'skipped')
+                menu.reset_mock()
+                result = installer.install(Path(temporary) / 'other-profile', 'codex executable', menu=False)
+                self.assertTrue(result['installed'])
+                menu.assert_not_called()
+
 
 class PackageTests(unittest.TestCase):
     def test_release_contains_no_documents_or_state(self):
@@ -185,6 +200,11 @@ class PackageTests(unittest.TestCase):
                     self.assertFalse(name.endswith(('open-pdf.sh', 'open-pdf.command', 'open-pdf.cmd', 'desktop_open.py')))
                 self.assertIn('codex-pdf-previewer/install.py', archive.namelist())
                 self.assertIn('codex-pdf-previewer/INSTALL.md', archive.namelist())
+                self.assertIn('codex-pdf-previewer/scripts/menu_open.py', archive.namelist())
+                self.assertIn('codex-pdf-previewer/scripts/linux_menu.py', archive.namelist())
+                manifest = json.loads(archive.read('codex-pdf-previewer/plugin.json'))
+                legacy = json.loads(archive.read('codex-pdf-previewer/.codex-plugin/plugin.json'))
+                self.assertEqual(manifest['version'], legacy['version'])
             self.assertFalse(report['documents_included'])
         with self.assertRaises(ValueError):
             builder.audit_payload('assets/reader/private.pdf', b'%PDF-1.4')

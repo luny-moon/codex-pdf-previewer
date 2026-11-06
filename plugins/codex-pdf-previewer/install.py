@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install this package into Codex using a durable local marketplace."""
 import argparse
+import importlib.util
 import json
 import os
 import shutil
@@ -14,7 +15,17 @@ NAME = 'codex-pdf-previewer'
 MARKETPLACE = 'codex-pdf-previewer-local'
 
 
-def install(codex_home=None, codex=None):
+def configure_menu(package_root, codex_home, launcher=None):
+    if sys.platform != 'linux':
+        return {'status': 'skipped', 'reason': 'PDF menu integration currently supports Linux'}
+    spec = importlib.util.spec_from_file_location('codex_pdf_linux_menu',
+                                                 package_root / 'scripts/linux_menu.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.install_menu(package_root, codex_home, launcher)
+
+
+def install(codex_home=None, codex=None, menu=True, gui_launcher=None):
     if sys.version_info < (3, 10):
         raise RuntimeError('Python 3.10 or newer is required')
     executable = codex or shutil.which('codex')
@@ -57,18 +68,29 @@ def install(codex_home=None, codex=None):
                                 text=True, encoding='utf-8', timeout=90)
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or 'Codex could not install the plugin')
-    # Do not print raw installation records or change OS/browser settings.
+    menu_result = {'status': 'skipped', 'reason': 'Disabled with --no-menu'}
+    if menu:
+        try:
+            menu_result = configure_menu(source / 'plugin', home, gui_launcher)
+        except Exception:
+            # The reader is installed even on systems without a supported GUI
+            # launcher or desktop integration. Never fall back to a browser.
+            menu_result = {'status': 'skipped', 'reason': 'PDF menu setup could not be completed'}
+    # Do not print raw CLI installation records or make this the default reader.
     return {'installed': True, 'plugin': NAME, 'version': manifest['version'],
-            'refresh_or_restart_codex': True}
+            'refresh_or_restart_codex': True, 'pdf_menu': menu_result}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--codex', help='Path to the Codex CLI if it is not on PATH')
     parser.add_argument('--codex-home', type=Path, help='Use a specific Codex profile')
+    parser.add_argument('--gui-launcher', type=Path, help='Absolute Codex GUI launcher path for the Linux PDF menu')
+    parser.add_argument('--no-menu', action='store_true', help='Install the reader without the Linux PDF menu')
     args = parser.parse_args()
     try:
-        print(json.dumps(install(args.codex_home, args.codex), ensure_ascii=False, indent=2))
+        print(json.dumps(install(args.codex_home, args.codex, not args.no_menu, args.gui_launcher),
+                         ensure_ascii=False, indent=2))
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(json.dumps({'error': str(error)}, ensure_ascii=False), file=sys.stderr)
         return 1
