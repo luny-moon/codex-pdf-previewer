@@ -12,10 +12,16 @@ Send the ZIP or this GitHub page to Codex and say:
 
 > Install this plugin for me.
 
-Then attach a PDF and say **“Open this PDF.”**
-
 Requires Codex desktop and Python 3.10+. Restart Codex if the plugin is not yet visible.
 Repository access is required while this project is private.
+
+## Open a PDF
+
+Attach a PDF and say **“Open this PDF.”**
+
+**Optional Linux menu shortcut:** after local setup, open a PDF in Codex and select **Open in → 用高清 PDF 插件打开**. A new HD preview tab opens while the original preview stays open.
+
+The menu shortcut has been verified locally on Linux and is not included in the v1.4.0 ZIP.
 
 ## Preview
 
