@@ -295,6 +295,14 @@ class MacMenuTests(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'darwin', 'Real applet event delivery requires macOS')
 class NativeMacAppletTests(unittest.TestCase):
     def test_real_compile_registration_and_open_documents_argv(self):
+        self._exercise_native_events(stay_open=False)
+
+    @unittest.skipUnless(os.environ.get('GITHUB_ACTIONS') == 'true',
+                         'Temporary stay-open comparison runs only on GitHub Actions')
+    def test_stay_open_lifetime_comparison(self):
+        self._exercise_native_events(stay_open=True)
+
+    def _exercise_native_events(self, stay_open):
         if not all(Path(tool).is_file() for tool in ('/usr/bin/osacompile', '/usr/bin/codesign', '/usr/bin/open')):
             self.skipTest('Standard macOS applet tools are unavailable')
         menu = load_module()
@@ -319,6 +327,8 @@ class NativeMacAppletTests(unittest.TestCase):
                 document.write_bytes(sample_pdf())
                 second = base / 'second.pdf'
                 second.write_bytes(sample_pdf(2))
+                third = base / 'third fresh.pdf'
+                third.write_bytes(sample_pdf(3))
                 # Standard user Applications location, but unique synthetic id
                 # and name. The real Codex app and its URL default are untouched.
                 diagnostics = []
@@ -329,9 +339,17 @@ class NativeMacAppletTests(unittest.TestCase):
                     diagnostics.append({'synthetic_probe': str(probe), 'result': response})
                     return response
 
+                original_run = menu._run
+
+                def comparison_run(argv, message):
+                    if stay_open and str(argv[0]) == '/usr/bin/osacompile':
+                        argv = [argv[0], '-s', *argv[1:]]
+                    return original_run(argv, message)
+
                 with patch.object(menu, 'BUNDLE_ID', identifier), \
                         patch.object(menu, 'APP_NAME', app_name), \
-                        patch.object(menu, '_query', side_effect=captured_query):
+                        patch.object(menu, '_query', side_effect=captured_query), \
+                        patch.object(menu, '_run', side_effect=comparison_run):
                     result = menu.install_menu(package, base / 'profile', launcher=gui)
                     if result['status'] != 'installed':
                         self.fail(json.dumps({'installation': result,
@@ -342,21 +360,32 @@ class NativeMacAppletTests(unittest.TestCase):
                     self.assertFalse(result['ui_verified'])
                     self.assertEqual(Path(result['app_bundle']).resolve(), expected_app)
                     app = Path(result['app_bundle'])
+                    expected_prefix = ['--launcher', str(gui.resolve()), '--state-dir', result['state_dir']]
                     subprocess.run(['/usr/bin/open', '-a', str(app), str(document)], check=True,
                                    capture_output=True, text=True, timeout=20)
-                    self._wait_for_records(record, 1)
-                    subprocess.run(['/usr/bin/open', '-a', str(app), str(second), str(document)],
+                    first = self._wait_for_records(record, 1, 'initial single document')
+                    self.assertEqual(first, [expected_prefix + [str(document)]])
+                    # Distinguish genuine batch delivery from the OS possibly
+                    # treating an already-open document specially.
+                    subprocess.run(['/usr/bin/open', '-a', str(app), str(second), str(third)],
                                    check=True, capture_output=True, text=True, timeout=20)
-                    rows = self._wait_for_records(record, 3)
-                    expected_prefix = ['--launcher', str(gui.resolve()), '--state-dir', result['state_dir']]
+                    rows = self._wait_for_records(record, 3, 'two fresh documents in one event')
                     self.assertEqual(rows[0], expected_prefix + [str(document)])
                     self.assertCountEqual(rows[1:], [expected_prefix + [str(second)],
-                                                    expected_prefix + [str(document)]])
+                                                    expected_prefix + [str(third)]])
+                    subprocess.run(['/usr/bin/open', '-a', str(app), str(document)], check=True,
+                                   capture_output=True, text=True, timeout=20)
+                    repeated = self._wait_for_records(record, 4, 'repeat the original document')
+                    self.assertEqual(repeated[3:], [expected_prefix + [str(document)]])
                     probe = base / 'probe.pdf'
                     probe.write_bytes(sample_pdf())
                     after = menu._query(probe)
                     self.assertTrue(menu._discovered(after, app))
         finally:
+            # A stay-open comparison must not leave an applet process behind.
+            # The public query/terminate helper requires BOTH our random bundle
+            # id and exact canonical app path before touching any process.
+            self._stop_owned_applet(identifier, expected_app)
             if expected_app.is_dir() and not expected_app.is_symlink():
                 info_path = expected_app / 'Contents/Info.plist'
                 info = plistlib.loads(info_path.read_bytes())
@@ -368,15 +397,67 @@ class NativeMacAppletTests(unittest.TestCase):
                 except OSError:
                     pass
 
-    def _wait_for_records(self, record, count):
+    def _owned_applet_processes(self, identifier, app, action):
+        script = r"""
+ObjC.import('AppKit');
+function run(argv) {
+    var identifier = argv[0], expected = argv[1], action = argv[2];
+    var applications = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(identifier);
+    var result = [];
+    for (var i = 0; i < applications.count; i++) {
+        var application = applications.objectAtIndex(i);
+        var location = application.bundleURL;
+        if (!location) continue;
+        var actual = ObjC.unwrap(location.URLByResolvingSymlinksInPath.path);
+        if (actual !== expected || ObjC.unwrap(application.bundleIdentifier) !== identifier) continue;
+        var pid = Number(application.processIdentifier);
+        if (action === 'terminate') application.terminate;
+        if (action === 'force') application.forceTerminate;
+        result.push(pid);
+    }
+    return JSON.stringify(result);
+}
+"""
+        response = subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e', script,
+                                   identifier, str(app.resolve()), action],
+                                  check=True, capture_output=True, text=True,
+                                  encoding='utf-8', timeout=10)
+        return json.loads(response.stdout)
+
+    def _stop_owned_applet(self, identifier, app):
+        if not self._owned_applet_processes(identifier, app, 'inspect'):
+            return
+        self._owned_applet_processes(identifier, app, 'terminate')
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if not self._owned_applet_processes(identifier, app, 'inspect'):
+                return
+            time.sleep(0.1)
+        self._owned_applet_processes(identifier, app, 'force')
+        self.assertFalse(self._owned_applet_processes(identifier, app, 'inspect'),
+                         'The exact synthetic applet did not stop during cleanup')
+
+    def _wait_for_records(self, record, count, stage):
         deadline = time.monotonic() + 20
+        rows = []
+        last_parse_error = None
         while time.monotonic() < deadline:
             if record.exists():
-                rows = [json.loads(line) for line in record.read_text(encoding='utf-8').splitlines()]
-                if len(rows) >= count:
-                    return rows
+                try:
+                    rows = [json.loads(line) for line in record.read_text(encoding='utf-8').splitlines()]
+                    last_parse_error = None
+                except json.JSONDecodeError as error:
+                    # An event recorder may still be flushing its last line.
+                    last_parse_error = str(error)
+                else:
+                    if len(rows) >= count:
+                        return rows
             time.sleep(0.1)
-        self.fail('The synthetic applet did not receive the expected Open Documents events')
+        self.fail('Synthetic Open Documents event did not finish: ' + json.dumps(
+            {'stage': stage, 'expected_record_count': count, 'received_rows': rows,
+             'synthetic_record': str(record), 'last_parse_error': last_parse_error},
+            ensure_ascii=False))
+
 
 
 if __name__ == '__main__':
